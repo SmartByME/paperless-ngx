@@ -1,0 +1,25 @@
+# override.yml
+version: "3.9"
+
+services:
+  webserver:
+    # Paperless-Daten & Import/Export auf Homeserver binden
+    volumes:
+      - /data/nas/homeserver01/docker/paperless/data:/usr/src/paperless/data
+      - /data/nas/homeserver01/docker/paperless/media:/usr/src/paperless/media
+      - /data/nas/homeserver01/docker/paperless/export:/usr/src/paperless/export
+      - /data/nas/homeserver01/docker/paperless/consume:/usr/src/paperless/consume:rw
+    # Optional: Dateirechte passend zum Host setzen
+    environment:
+      - USERMAP_UID=1000
+      - USERMAP_GID=1000
+
+  db:
+    # PostgreSQL-Daten auf Homeserver
+    volumes:
+      - /data/nas/homeserver01/docker/paperless/postgres:/var/lib/postgresql/data
+
+  broker:
+    # Redis-Persistenz (optional, aber empfehlenswert)
+    volumes:
+      - /data/nas/homeserver01/docker/paperless/redis:/data
