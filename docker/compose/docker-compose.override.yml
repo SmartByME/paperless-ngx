@@ -19,7 +19,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      paperlessngx-ai:
+      paperless-ai:
         condition: service_started
     environment:
       # Muss exakt dem DB-Servicenamen entsprechen
