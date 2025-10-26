@@ -50,6 +50,18 @@ services:
     # Tika benötigt keine Persistenz
     # keine zusätzlichen Einstellungen nötig
 
+  samba:
+    image: dperson/samba
+    container_name: paperless-samba
+    restart: always
+    network_mode: host
+    volumes:
+      - /data/nas/homeserver01/docker/paperless/consume:/mount
+    command: >
+      -p
+      -u "usrScanner;xEhqDsBuXB79Xw"
+      -s "scanner;/mount;yes;no;no;usrScanner;usrScanner"
+
   paperless-ai:
     image: clusterzx/paperless-ai
     container_name: paperless-ai
