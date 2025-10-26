@@ -17,7 +17,7 @@ services:
   db:
     # PostgreSQL-Daten auf Homeserver
     volumes:
-      - /data/nas/homeserver01/docker/paperless/postgres:/var/lib/postgresql/data
+      - /data/nas/homeserver01/docker/paperless/postgres:/var/lib/postgresql
 
   broker:
     # Redis-Persistenz (optional, aber empfehlenswert)
