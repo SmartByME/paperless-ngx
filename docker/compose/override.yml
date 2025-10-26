@@ -23,3 +23,18 @@ services:
     # Redis-Persistenz (optional, aber empfehlenswert)
     volumes:
       - /data/nas/homeserver01/docker/paperless/redis:/data
+
+  paperless-ai:
+    image: clusterzx/paperless-ai
+    container_name: PaperlessNGX-AI
+    restart: on-failure:5
+    ports:
+      - "3747:3000"
+    volumes:
+      - /data/nas/homeserver01/docker/paperless/ai:/app/data:rw
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/3000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
