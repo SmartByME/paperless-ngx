@@ -29,7 +29,7 @@ services:
       PAPERLESS_DBUSER: paperless
       PAPERLESS_DBPASS: change-me
       # AI-Integration
-      PAPERLESS_AI_URL: http://paperlessngx-ai:3000
+      PAPERLESS_AI_URL: http://paperless-ai:3000
     volumes:
       # Standard-Pfade von Paperless persistieren
       - /data/nas/homeserver01/docker/paperless/data:/usr/src/paperless/data
@@ -50,9 +50,9 @@ services:
     # Tika benötigt keine Persistenz
     # keine zusätzlichen Einstellungen nötig
 
-  paperlessngx-ai:
+  paperless-ai:
     image: clusterzx/paperless-ai
-    container_name: PaperlessNGX-AI
+    container_name: paperless-ai
     restart: on-failure:5
     ports:
       - "3747:3000"
