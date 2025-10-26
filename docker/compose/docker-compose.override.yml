@@ -39,14 +39,14 @@ services:
       # optional, falls du Logs persistent willst:
       #- /data/nas/homeserver01/docker/paperless/logs:/usr/src/paperless/logs
 
-  redis:
+  # redis:
     # Redis braucht i. d. R. keine Persistenz für Paperless;
     # wenn gewünscht, kannst du eine AOF/dir-Mount ergänzen.
     # Beispiel (optional):
     # volumes:
     #   - /data/nas/homeserver01/docker/paperless/redis:/data
 
-  tika:
+  # tika:
     # Tika benötigt keine Persistenz
     # keine zusätzlichen Einstellungen nötig
 
