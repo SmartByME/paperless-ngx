@@ -71,10 +71,10 @@ services:
     network_mode: host
     volumes:
       - /data/nas/homeserver01/docker/paperless/consume:/mount
-    command: >
-      -p
-      -u "usrScanner;xEhqDsBuXB79Xw"
-      -s "scanner;/mount;yes;no;no;usrScanner;usrScanner"
+    environment:
+      PERMISSIONS: "true"
+      USER: "${SAMBA_USERPASS}"
+      SHARE: "${SAMBA_SHARE_DEF}"
 
   paperless-ai:
     image: clusterzx/paperless-ai
