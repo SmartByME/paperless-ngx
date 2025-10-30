@@ -3,9 +3,9 @@ services:
   db:
     image: docker.io/library/postgres:18
     environment:
-      POSTGRES_DB: paperless
-      POSTGRES_USER: paperless
-      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB=${PAPERLESS_DBNAME}
+      POSTGRES_USER=${PAPERLESS_DBUSER}
+      POSTGRES_PASSWORD=${PAPERLESS_DBPASS}
     volumes:
       # Neuer Mount-Pfad ab Postgres 18: /var/lib/postgresql
       - /data/nas/homeserver01/docker/paperless/pgdata:/var/lib/postgresql
@@ -22,13 +22,27 @@ services:
       paperless-ai:
         condition: service_started
     environment:
-      # Muss exakt dem DB-Servicenamen entsprechen
-      PAPERLESS_DBHOST: db
-      PAPERLESS_DBPORT: "5432"
-      PAPERLESS_DBNAME: paperless
-      PAPERLESS_DBUSER: paperless
-      PAPERLESS_DBPASS: change-me
-      # AI-Integration
+      # === Kritisch ===
+      PAPERLESS_DBHOST=${PAPERLESS_DBHOST}
+      PAPERLESS_DBPORT=${PAPERLESS_DBPORT}
+      PAPERLESS_DBNAME=${PAPERLESS_DBNAME}
+      PAPERLESS_DBUSER=${PAPERLESS_DBUSER}
+      PAPERLESS_DBPASS=${PAPERLESS_DBPASS}
+      
+      # === Web-Zugriff / Sicherheit ===
+      PAPERLESS_URL=${PAPERLESS_URL}
+      PAPERLESS_CSRF_TRUSTED_ORIGINS=${PAPERLESS_CSRF_TRUSTED_ORIGINS}
+      
+      # === Admin-Zugang (nur Erststart) ===
+      PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER}
+      PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD}
+      
+      # === Komfort / OCR / Zeitzone ===
+      PAPERLESS_TIME_ZONE=${PAPERLESS_TIME_ZONE}
+      PAPERLESS_OCR_LANGUAGE=${PAPERLESS_OCR_LANGUAGE}
+      PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD=${PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD}
+      PAPERLESS_FILENAME_FORMAT=${PAPERLESS_FILENAME_FORMAT}
+      # === AI-Integration ====
       PAPERLESS_AI_URL: http://paperless-ai:3000
     volumes:
       # Standard-Pfade von Paperless persistieren
