@@ -530,6 +530,7 @@ class TestFileHandling(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
 
     @override_settings(
         FILENAME_FORMAT="{{title}}_{{custom_fields|get_cf_value('test')}}",
+        CELERY_TASK_ALWAYS_EAGER=True,
     )
     @mock.patch("documents.signals.handlers.update_filename_and_move_files")
     def test_select_cf_updated(self, m):
@@ -579,7 +580,7 @@ class TestFileHandling(DirectoriesMixin, FileSystemAssertsMixin, TestCase):
         }
         cf.save()
         self.assertEqual(generate_filename(doc), Path("document_aubergine.pdf"))
-        # handler should have been called
+        # handler should have been called once via the async task
         self.assertEqual(m.call_count, 1)
 
 
@@ -1076,6 +1077,47 @@ class TestFilenameGeneration(DirectoriesMixin, TestCase):
         self.assertEqual(
             generate_filename(doc_b),
             Path("SomeImportantNone/2020-07-25.pdf"),
+        )
+
+    @override_settings(
+        FILENAME_FORMAT=(
+            "{% if correspondent == 'none' %}none/{% endif %}"
+            "{% if correspondent == '-none-' %}dash/{% endif %}"
+            "{% if not correspondent %}false/{% endif %}"
+            "{% if correspondent != 'none' %}notnoneyes/{% else %}notnoneno/{% endif %}"
+            "{{ correspondent or 'missing' }}/{{ title }}"
+        ),
+    )
+    def test_placeholder_matches_none_variants_and_false(self):
+        """
+        GIVEN:
+            - Templates that compare against 'none', '-none-' and rely on truthiness
+        WHEN:
+            - A document has or lacks a correspondent
+        THEN:
+            - Empty placeholders behave like both strings and evaluate False
+        """
+        doc_without_correspondent = Document.objects.create(
+            title="does not matter",
+            mime_type="application/pdf",
+            checksum="abc",
+        )
+        doc_with_correspondent = Document.objects.create(
+            title="does not matter",
+            mime_type="application/pdf",
+            checksum="def",
+            correspondent=Correspondent.objects.create(name="Acme"),
+        )
+
+        self.assertEqual(
+            generate_filename(doc_without_correspondent),
+            Path(
+                "none/dash/false/notnoneno/missing/does not matter.pdf",
+            ),
+        )
+        self.assertEqual(
+            generate_filename(doc_with_correspondent),
+            Path("notnoneyes/Acme/does not matter.pdf"),
         )
 
     @override_settings(
