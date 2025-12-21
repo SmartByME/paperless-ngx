@@ -19,8 +19,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      paperless-ai:
-        condition: service_started
+      # paperless-ai:
+        # condition: service_started
     environment:
       # === Kritisch ===
       PAPERLESS_DBHOST: ${PAPERLESS_DBHOST}
