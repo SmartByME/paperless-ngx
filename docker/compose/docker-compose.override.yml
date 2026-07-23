@@ -5,12 +5,6 @@ services:
   broker:
     volumes:
       - /data/nas/homeserver01/docker/paperless/redisdata:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
 
   db:
     environment:
