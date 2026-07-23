@@ -31,11 +31,25 @@ services:
       db:
         condition: service_healthy
     environment:
-      # PAPERLESS_DBHOST=db und PAPERLESS_DBENGINE=postgresql kommen aus der Basis.
-      # Port 5432 ist der Standard und muss nicht überschrieben werden.
-      PAPERLESS_DBNAME: "${PAPERLESS_DBNAME}"
-      PAPERLESS_DBUSER: "${PAPERLESS_DBUSER}"
-      PAPERLESS_DBPASS: "${PAPERLESS_DBPASS}"
+      # === Kritisch ===
+      PAPERLESS_DBHOST: ${PAPERLESS_DBHOST}
+      PAPERLESS_DBPORT: ${PAPERLESS_DBPORT}
+      PAPERLESS_DBNAME: ${PAPERLESS_DBNAME}
+      PAPERLESS_DBUSER: ${PAPERLESS_DBUSER}
+      PAPERLESS_DBPASS: ${PAPERLESS_DBPASS}
+      
+      # === Web-Zugriff / Sicherheit ===
+      PAPERLESS_URL: ${PAPERLESS_URL}
+      PAPERLESS_CSRF_TRUSTED_ORIGINS: ${PAPERLESS_CSRF_TRUSTED_ORIGINS}
+      
+      # === Admin-Zugang (nur Erststart) ===
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      # === Komfort / OCR / Zeitzone ===
+      PAPERLESS_TIME_ZONE: ${PAPERLESS_TIME_ZONE}
+      PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE}
+      PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD: ${PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD}
+      PAPERLESS_FILENAME_FORMAT: ${PAPERLESS_FILENAME_FORMAT}
     volumes:
       - /data/nas/homeserver01/docker/paperless/data:/usr/src/paperless/data
       - /data/nas/homeserver01/docker/paperless/media:/usr/src/paperless/media
