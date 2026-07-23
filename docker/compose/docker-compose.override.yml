@@ -55,18 +55,6 @@ services:
       - /data/nas/homeserver01/docker/paperless/export:/usr/src/paperless/export
       - /data/nas/homeserver01/docker/paperless/consume:/usr/src/paperless/consume
 
-  tika:
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:9998/version || exit 1"
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   samba:
     image: dperson/samba
     restart: unless-stopped
