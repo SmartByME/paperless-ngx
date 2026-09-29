@@ -13,6 +13,7 @@ import {
   ViewChild,
 } from '@angular/core'
 import {
+  AnnotationMode,
   getDocument,
   GlobalWorkerOptions,
   PDFDocumentLoadingTask,
@@ -20,6 +21,7 @@ import {
 } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
   EventBus,
+  LinkTarget,
   PDFFindController,
   PDFLinkService,
   PDFSinglePageViewer,
@@ -43,6 +45,7 @@ export class PngxPdfViewerComponent
   private readonly document = inject<Document>(DOCUMENT)
 
   @Input() src!: string
+  @Input() sourceRevision = 0
   @Input() password?: string
   @Input() page?: number
   @Output() pageChange = new EventEmitter<number>()
@@ -73,7 +76,11 @@ export class PngxPdfViewerComponent
   private lastViewerPage?: number
 
   private readonly eventBus = new EventBus()
-  private readonly linkService = new PDFLinkService({ eventBus: this.eventBus })
+  private readonly linkService = new PDFLinkService({
+    eventBus: this.eventBus,
+    externalLinkTarget: LinkTarget.BLANK,
+    externalLinkRel: 'noopener noreferrer nofollow',
+  })
   private readonly findController = new PDFFindController({
     eventBus: this.eventBus,
     linkService: this.linkService,
@@ -93,7 +100,7 @@ export class PngxPdfViewerComponent
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['src'] || changes['password']) {
+    if (changes['src'] || changes['sourceRevision'] || changes['password']) {
       this.resetViewerState()
       if (this.src) {
         this.loadDocument()
@@ -115,7 +122,10 @@ export class PngxPdfViewerComponent
       changes['zoomScale'] ||
       changes['rotation']
     ) {
-      this.applyViewerState()
+      // Prevent loop with page / scale application see https://github.com/paperless-ngx/paperless-ngx/issues/13404
+      this.applyViewerState(
+        !!(changes['zoom'] || changes['zoomScale'] || changes['rotation'])
+      )
     }
 
     if (changes['searchQuery']) {
@@ -217,6 +227,8 @@ export class PngxPdfViewerComponent
       linkService: this.linkService,
       findController: this.findController,
       textLayerMode,
+      annotationMode: AnnotationMode.ENABLE,
+      enableSelectionRendering: false,
       removePageBorders: true,
     }
 
@@ -239,7 +251,7 @@ export class PngxPdfViewerComponent
     }
   }
 
-  private applyViewerState(): void {
+  private applyViewerState(applyScale = true): void {
     if (!this.pdfViewer) {
       return
     }
@@ -263,7 +275,7 @@ export class PngxPdfViewerComponent
     if (this.page === this.lastViewerPage) {
       this.lastViewerPage = undefined
     }
-    if (hasPages) {
+    if (hasPages && applyScale) {
       this.applyScale()
     }
     this.dispatchFindIfReady()

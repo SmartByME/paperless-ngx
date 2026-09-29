@@ -150,6 +150,7 @@ pnpm ng build --configuration production
   is loaded as well. However, the tests rely on the default
   configuration. This is not ideal. But for now, make sure no settings
   except for DEBUG are overridden when testing.
+- Tests run in a random order each session, so that one test cannot quietly depend on another having run first. The seed is printed at the top of the run; pass `--randomly-seed=<seed>` to replay that exact order, or `--randomly-seed=last` to repeat the previous run.
 
 !!! note
 
@@ -224,13 +225,19 @@ respectively, can be run non-interactively with:
 
 ```bash
 pnpm ng test
-pnpm playwright test
+pnpm e2e
 ```
+
+The Playwright suite starts both the Angular development server and a disposable
+Paperless instance on port 8001. The instance uses SQLite, temporary data and
+media directories, and deterministic sample documents; it is removed when the
+test run finishes. This requires the back-end Python dependencies from the
+regular development setup to be installed with `uv sync`.
 
 Playwright also includes a UI which can be run with:
 
 ```bash
-pnpm playwright test --ui
+pnpm e2e:ui
 ```
 
 ### Building the frontend
@@ -409,10 +416,10 @@ plain class attributes (not instance attributes or properties):
 
 ```python
 class MyCustomParser:
-    name    = "My Format Parser"   # human-readable name shown in logs
-    version = "1.0.0"              # semantic version string
-    author  = "Acme Corp"          # author / organisation
-    url     = "https://example.com/my-parser"  # docs or issue tracker
+    name = "My Format Parser"  # human-readable name shown in logs
+    version = "1.0.0"  # semantic version string
+    author = "Acme Corp"  # author / organisation
+    url = "https://example.com/my-parser"  # docs or issue tracker
 ```
 
 **Declaring supported MIME types**
@@ -456,13 +463,28 @@ def score(
     return 10
 ```
 
+**Remote services**
+
+If your parser sends document content to a remote service, declare it:
+
+```python
+class MyCustomParser:
+    uses_remote_service = True
+```
+
+Paperless-ngx excludes such parsers when the document being consumed has not
+been marked for remote processing, so users can keep remote OCR off by default
+and enable it selectively with a workflow. Parsers that do not declare the
+attribute are treated as fully local and are always considered.
+
 **Archive and rendition flags**
 
 ```python
 @property
 def can_produce_archive(self) -> bool:
     """True if parse() can produce a searchable PDF archive copy."""
-    return True   # or False if your parser doesn't produce PDFs
+    return True  # or False if your parser doesn't produce PDFs
+
 
 @property
 def requires_pdf_rendition(self) -> bool:
@@ -486,6 +508,7 @@ from typing import Self
 from types import TracebackType
 
 from django.conf import settings
+
 
 class MyCustomParser:
     ...
@@ -519,8 +542,9 @@ implementation is fine:
 ```python
 from paperless.parsers import ParserContext
 
+
 def configure(self, context: ParserContext) -> None:
-    pass   # override if you need context.mailrule_id, etc.
+    pass  # override if you need context.mailrule_id, etc.
 ```
 
 **Parsing**
@@ -531,6 +555,7 @@ Raise `documents.parsers.ParseError` on any unrecoverable failure.
 
 ```python
 from documents.parsers import ParseError
+
 
 def parse(
     self,
@@ -557,18 +582,20 @@ def get_text(self) -> str:
     # Return the extracted text, or an empty string if none was found.
     return self._text
 
+
 def get_date(self) -> "datetime.datetime | None":
     # Return a datetime extracted from the document, or None to let
     # Paperless-ngx use its default date-guessing logic.
     return None
 
+
 def get_archive_path(self) -> Path | None:
     return self._archive_path
+
 
 def get_page_count(self, document_path: Path, mime_type: str) -> int | None:
     # If the format doesn't have the concept of pages, return None
     return count_pages(document_path)
-
 ```
 
 **Thumbnail**
@@ -591,7 +618,6 @@ Implement them if your format supports the information; otherwise return
 `None` / `[]`.
 
 ```python
-
 def extract_metadata(
     self,
     document_path: Path,
@@ -599,6 +625,7 @@ def extract_metadata(
 ) -> "list[MetadataEntry]":
     # Must never raise. Return [] if metadata cannot be read.
     from paperless.parsers import MetadataEntry
+
     return [
         MetadataEntry(
             namespace="https://example.com/ns/",
@@ -661,17 +688,19 @@ from paperless.parsers import ParserContext
 
 
 class XmlDocumentParser:
-    name    = "XML Parser"
+    name = "XML Parser"
     version = "1.0.0"
-    author  = "Acme Corp"
-    url     = "https://example.com/xml-parser"
+    author = "Acme Corp"
+    url = "https://example.com/xml-parser"
 
     @classmethod
     def supported_mime_types(cls) -> dict[str, str]:
         return {"application/xml": ".xml", "text/xml": ".xml"}
 
     @classmethod
-    def score(cls, mime_type: str, filename: str, path: Path | None = None) -> int | None:
+    def score(
+        cls, mime_type: str, filename: str, path: Path | None = None
+    ) -> int | None:
         return 10
 
     @property
@@ -684,7 +713,9 @@ class XmlDocumentParser:
 
     def __init__(self, logging_group: object = None) -> None:
         settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
-        self._tempdir = Path(tempfile.mkdtemp(prefix="paperless-", dir=settings.SCRATCH_DIR))
+        self._tempdir = Path(
+            tempfile.mkdtemp(prefix="paperless-", dir=settings.SCRATCH_DIR)
+        )
         self._text: str = ""
 
     def __enter__(self) -> Self:
@@ -696,7 +727,9 @@ class XmlDocumentParser:
     def configure(self, context: ParserContext) -> None:
         pass
 
-    def parse(self, document_path: Path, mime_type: str, *, produce_archive: bool = True) -> None:
+    def parse(
+        self, document_path: Path, mime_type: str, *, produce_archive: bool = True
+    ) -> None:
         try:
             tree = ET.parse(document_path)
             self._text = " ".join(tree.getroot().itertext())
@@ -714,6 +747,7 @@ class XmlDocumentParser:
 
     def get_thumbnail(self, document_path: Path, mime_type: str) -> Path:
         from PIL import Image, ImageDraw
+
         img = Image.new("RGB", (500, 700), color="white")
         ImageDraw.Draw(img).text((10, 10), "XML Document", fill="black")
         out = self._tempdir / "thumb.webp"
@@ -801,6 +835,7 @@ def _parse_string(
     """
     Parse a single date string using dateparser with configured settings.
     """
+
 
 def _filter_date(
     self,

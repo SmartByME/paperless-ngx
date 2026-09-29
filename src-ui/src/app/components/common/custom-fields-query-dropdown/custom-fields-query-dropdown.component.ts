@@ -1,9 +1,16 @@
-import { NgTemplateOutlet } from '@angular/common'
+import { _IdGenerator } from '@angular/cdk/a11y'
+import {
+  getLocaleNumberSymbol,
+  NgClass,
+  NgTemplateOutlet,
+  NumberSymbol,
+} from '@angular/common'
 import {
   Component,
   EventEmitter,
   inject,
   Input,
+  LOCALE_ID,
   Output,
   QueryList,
   signal,
@@ -43,25 +50,26 @@ import { ClearableBadgeComponent } from '../clearable-badge/clearable-badge.comp
 import { DocumentLinkComponent } from '../input/document-link/document-link.component'
 
 export class CustomFieldQueriesModel {
-  private _queries: CustomFieldQueryElement[] = []
+  private readonly _queries = signal<CustomFieldQueryElement[]>([])
   private rootSubscriptions: Subscription[] = []
 
   public readonly changed = new Subject<CustomFieldQueriesModel>()
 
   public get queries(): CustomFieldQueryElement[] {
-    return this._queries
+    return this._queries()
   }
 
   public set queries(value: CustomFieldQueryElement[]) {
     this.teardownRootSubscriptions()
-    this._queries = value ?? []
-    for (const element of this._queries) {
+    const queries = value ?? []
+    for (const element of queries) {
       this.rootSubscriptions.push(
         element.changed.subscribe(() => {
           this.changed.next(this)
         })
       )
     }
+    this._queries.set(queries)
   }
 
   public clear(fireEvent = true) {
@@ -204,6 +212,7 @@ export class CustomFieldQueriesModel {
     DocumentLinkComponent,
     ReactiveFormsModule,
     NgbDatepickerModule,
+    NgClass,
     NgTemplateOutlet,
     NgSelectModule,
     NgxBootstrapIconsModule,
@@ -212,6 +221,7 @@ export class CustomFieldQueriesModel {
 })
 export class CustomFieldsQueryDropdownComponent extends LoadingComponentWithPermissions {
   protected customFieldsService = inject(CustomFieldsService)
+  private readonly locale = inject(LOCALE_ID)
 
   public CustomFieldQueryComponentType = CustomFieldQueryElementType
   public CustomFieldQueryOperator = CustomFieldQueryOperator
@@ -240,6 +250,18 @@ export class CustomFieldsQueryDropdownComponent extends LoadingComponentWithPerm
 
   @Input()
   useDropdown: boolean = true
+
+  private readonly idGenerator = inject(_IdGenerator)
+  public readonly dropdownMenuId = this.idGenerator.getId(
+    'pngx-custom-fields-query-dropdown-'
+  )
+
+  /**
+   * Keep ng-select dropdown panels inside the dropdown menu
+   */
+  get selectAppendTo(): string {
+    return this.useDropdown ? `#${this.dropdownMenuId}` : null
+  }
 
   get name(): string {
     return this.title ? this.title.replace(/\s/g, '_').toLowerCase() : null
@@ -375,5 +397,19 @@ export class CustomFieldsQueryDropdownComponent extends LoadingComponentWithPerm
       return field.extra_data['select_options']
     }
     return []
+  }
+
+  setMonetaryValue(atom: CustomFieldQueryAtom, value: string) {
+    // Normalize the decimal symbol e.g. . vs , by locale
+    const decimalSymbol = getLocaleNumberSymbol(
+      this.locale,
+      NumberSymbol.Decimal
+    )
+    if (decimalSymbol !== '.' && value.includes(decimalSymbol)) {
+      const groupSymbol = getLocaleNumberSymbol(this.locale, NumberSymbol.Group)
+      value = value.split(groupSymbol).join('').split(decimalSymbol).join('.')
+    }
+
+    atom.value = value
   }
 }

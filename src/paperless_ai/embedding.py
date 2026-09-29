@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from llama_index.core.base.embeddings.base import BaseEmbedding
 
 from documents.models import Document
-from documents.models import Note
 from paperless.config import AIConfig
 from paperless.models import LLMEmbeddingBackend
 from paperless.network import PinnedHostAsyncHTTPTransport
@@ -15,6 +14,7 @@ from paperless.network import PinnedHostHTTPTransport
 from paperless.network import create_pinned_async_httpx_client
 from paperless.network import create_pinned_httpx_client
 from paperless.network import validate_outbound_http_url
+from paperless_ai.client import PLACEHOLDER_API_KEY
 
 OCR_LEADER_REGEX = re.compile(r"[._\-\u00b7]{4,}")
 HORIZONTAL_WHITESPACE_REGEX = re.compile(r"[ \t\u00a0]+")
@@ -41,7 +41,9 @@ def get_embedding_model(config: AIConfig) -> "BaseEmbedding":
                 )
             return OpenAILikeEmbedding(
                 model_name=config.llm_embedding_model or "text-embedding-3-small",
-                api_key=config.llm_api_key,
+                api_key=config.llm_embedding_api_key
+                or config.llm_api_key
+                or PLACEHOLDER_API_KEY,
                 api_base=endpoint,
                 timeout=config.llm_request_timeout,
                 http_client=http_client,
@@ -126,7 +128,7 @@ def build_llm_index_text(doc: Document) -> str:
     # prepend. Notes and Custom Fields stay in the body: Notes can be long free
     # text, Custom Fields are dynamic in count and best kept in the embedding.
     lines = [
-        f"Notes: {','.join([str(c.note) for c in Note.objects.filter(document=doc)])}",
+        f"Notes: {','.join([str(c.note) for c in doc.notes.all()])}",
     ]
 
     for instance in doc.custom_fields.all():

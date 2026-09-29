@@ -7,6 +7,7 @@ from django.conf import settings
 
 from documents.models import Document
 from paperless.models import LLMEmbeddingBackend
+from paperless_ai.client import PLACEHOLDER_API_KEY
 from paperless_ai.embedding import _normalize_llm_index_text
 from paperless_ai.embedding import build_llm_index_text
 from paperless_ai.embedding import get_configured_model_name
@@ -16,6 +17,7 @@ from paperless_ai.embedding import get_embedding_model
 @pytest.fixture
 def mock_ai_config():
     with patch("paperless_ai.embedding.AIConfig") as MockAIConfig:
+        MockAIConfig.return_value.llm_embedding_api_key = None
         MockAIConfig.return_value.llm_embedding_endpoint = None
         MockAIConfig.return_value.llm_allow_internal_endpoints = True
         MockAIConfig.return_value.llm_context_size = 8192
@@ -54,6 +56,7 @@ def mock_document():
     cf2.field.name = "Field2"
     cf2.value = "Value2"
     doc.custom_fields.all = MagicMock(return_value=[cf1, cf2])
+    doc.notes.all = MagicMock(return_value=[])
 
     return doc
 
@@ -61,6 +64,7 @@ def mock_document():
 def test_get_embedding_model_openai(mock_ai_config):
     mock_ai_config.return_value.llm_embedding_backend = LLMEmbeddingBackend.OPENAI_LIKE
     mock_ai_config.return_value.llm_embedding_model = "text-embedding-3-small"
+    mock_ai_config.return_value.llm_embedding_api_key = "test_embedding_api_key"
     mock_ai_config.return_value.llm_api_key = "test_api_key"
     mock_ai_config.return_value.llm_endpoint = "http://test-url"
 
@@ -70,13 +74,47 @@ def test_get_embedding_model_openai(mock_ai_config):
         model = get_embedding_model(mock_ai_config.return_value)
         MockOpenAIEmbedding.assert_called_once_with(
             model_name="text-embedding-3-small",
-            api_key="test_api_key",
+            api_key="test_embedding_api_key",
             api_base="http://test-url",
             timeout=120,
             http_client=ANY,
             async_http_client=ANY,
         )
         assert model == MockOpenAIEmbedding.return_value
+
+
+def test_get_embedding_model_openai_falls_back_to_llm_api_key(mock_ai_config):
+    mock_ai_config.return_value.llm_embedding_backend = LLMEmbeddingBackend.OPENAI_LIKE
+    mock_ai_config.return_value.llm_embedding_model = "text-embedding-3-small"
+    mock_ai_config.return_value.llm_api_key = "test_api_key"
+    mock_ai_config.return_value.llm_endpoint = "http://test-url"
+
+    with patch(
+        "llama_index.embeddings.openai_like.OpenAILikeEmbedding",
+    ) as MockOpenAIEmbedding:
+        get_embedding_model(mock_ai_config.return_value)
+
+    assert MockOpenAIEmbedding.call_args.kwargs["api_key"] == "test_api_key"
+
+
+@pytest.mark.parametrize("configured_key", [None, ""])
+def test_get_embedding_model_openai_without_api_key_sends_placeholder(
+    mock_ai_config,
+    configured_key,
+):
+    """Same required key handling as the LLM client, see #13831."""
+    mock_ai_config.return_value.llm_embedding_backend = LLMEmbeddingBackend.OPENAI_LIKE
+    mock_ai_config.return_value.llm_embedding_model = "text-embedding-3-small"
+    mock_ai_config.return_value.llm_embedding_api_key = configured_key
+    mock_ai_config.return_value.llm_api_key = configured_key
+    mock_ai_config.return_value.llm_endpoint = "http://test-url"
+
+    with patch(
+        "llama_index.embeddings.openai_like.OpenAILikeEmbedding",
+    ) as MockOpenAIEmbedding:
+        get_embedding_model(mock_ai_config.return_value)
+
+    assert MockOpenAIEmbedding.call_args.kwargs["api_key"] == PLACEHOLDER_API_KEY
 
 
 def test_get_embedding_model_openai_prefers_embedding_endpoint(mock_ai_config):
@@ -219,28 +257,26 @@ def test_get_configured_model_name_explicit_overrides_default(mock_ai_config):
 
 
 def test_build_llm_index_text(mock_document):
-    with patch("documents.models.Note.objects.filter") as mock_notes_filter:
-        mock_notes_filter.return_value = [
-            MagicMock(note="Note1"),
-            MagicMock(note="Note2"),
-        ]
+    mock_document.notes.all = MagicMock(
+        return_value=[MagicMock(note="Note1"), MagicMock(note="Note2")],
+    )
 
-        result = build_llm_index_text(mock_document)
+    result = build_llm_index_text(mock_document)
 
-        # Structured fields live in node.metadata for LLM context -- not body text
-        assert "Title: Test Title" not in result
-        assert "Created: 2023-01-01" not in result
-        assert "Tags: Tag1, Tag2" not in result
-        assert "Document Type: Invoice" not in result
-        assert "Correspondent: Test Correspondent" not in result
-        assert "Filename:" not in result
-        assert "Storage Path:" not in result
-        assert "Archive Serial Number:" not in result
+    # Structured fields live in node.metadata for LLM context -- not body text
+    assert "Title: Test Title" not in result
+    assert "Created: 2023-01-01" not in result
+    assert "Tags: Tag1, Tag2" not in result
+    assert "Document Type: Invoice" not in result
+    assert "Correspondent: Test Correspondent" not in result
+    assert "Filename:" not in result
+    assert "Storage Path:" not in result
+    assert "Archive Serial Number:" not in result
 
-        # Fields without a metadata equivalent stay in body text
-        assert "Notes: Note1,Note2" in result
-        assert "Content:\n\nThis is the document content." in result
-        assert "Custom Field - Field1: Value1\nCustom Field - Field2: Value2" in result
+    # Fields without a metadata equivalent stay in body text
+    assert "Notes: Note1,Note2" in result
+    assert "Content:\n\nThis is the document content." in result
+    assert "Custom Field - Field1: Value1\nCustom Field - Field2: Value2" in result
 
 
 def test_build_llm_index_text_normalizes_ocr_punctuation_runs(mock_document):
@@ -250,8 +286,7 @@ def test_build_llm_index_text_normalizes_ocr_punctuation_runs(mock_document):
         "Keep short punctuation like INV-100 and ellipses..."
     )
 
-    with patch("documents.models.Note.objects.filter", return_value=[]):
-        result = build_llm_index_text(mock_document)
+    result = build_llm_index_text(mock_document)
 
     assert "Introduction 7" in result
     assert "Hardware Limitation 9" in result

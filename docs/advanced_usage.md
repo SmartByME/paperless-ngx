@@ -129,12 +129,18 @@ At a minimum you need to enable AI and choose an LLM backend:
   and/or [`PAPERLESS_AI_LLM_ENDPOINT`](configuration.md#PAPERLESS_AI_LLM_ENDPOINT). Ollama
   requires `PAPERLESS_AI_LLM_ENDPOINT` pointing at your Ollama server.
 
+See the community-maintained wiki page on
+[choosing AI models](https://github.com/paperless-ngx/paperless-ngx/wiki/AI-Model-Recommendations)
+for suggested generation and embedding models.
+
 ### AI-assisted suggestions
 
 With AI enabled, Paperless-ngx can suggest a title, tags, correspondent, document type,
 storage path and dates by sending the document to the LLM. This is **opt-in per request**
 and surfaces through the "Suggest" control on the document detail page, alongside the
-classic classifier-based suggestions — it does not disable them. Suggestion output
+classic classifier-based suggestions — it does not disable them. Suggestions are requested
+automatically when you open a document that carries an inbox tag unless "Automatically request
+suggestions for inbox documents" under Settings > Documents is disabled. Suggestion output
 language can be steered with
 [`PAPERLESS_AI_LLM_OUTPUT_LANGUAGE`](configuration.md#PAPERLESS_AI_LLM_OUTPUT_LANGUAGE)
 (otherwise it follows the user's UI language).
@@ -147,8 +153,11 @@ in similar existing documents, and the document chat can retrieve relevant conte
 
 Enable it by setting
 [`PAPERLESS_AI_LLM_EMBEDDING_BACKEND`](configuration.md#PAPERLESS_AI_LLM_EMBEDDING_BACKEND)
-(`huggingface` for fully-local embeddings, or `ollama` / `openai-like`). The index is only
-built when AI is enabled **and** an embedding backend is set.
+(`huggingface` for fully-local embeddings, or `ollama` / `openai-like`). By default, the main
+LLM API key and endpoint are used, but an optional embedding-specific[API key](configuration.md#PAPERLESS_AI_LLM_EMBEDDING_API_KEY)
+and [endpoint](configuration.md#PAPERLESS_AI_LLM_EMBEDDING_ENDPOINT) can be configured.
+
+The index is only built when AI is enabled **and** an embedding backend is set.
 
 The index is updated automatically on a schedule controlled by
 [`PAPERLESS_LLM_INDEX_TASK_CRON`](configuration.md#PAPERLESS_LLM_INDEX_TASK_CRON) (daily by
@@ -808,7 +817,8 @@ Third-party parser plugins extend Paperless-ngx to support additional file
 formats. A plugin is a Python package that advertises itself under the
 `paperless_ngx.parsers` entry point group. Refer to the
 [developer documentation](development.md#making-custom-parsers) for how to
-create one.
+create one, or see the wiki for a community-maintained list of
+[parser plugins](https://github.com/paperless-ngx/paperless-ngx/wiki/Related-Projects#parser-plugins).
 
 !!! warning "Third-party plugins are not officially supported"
 

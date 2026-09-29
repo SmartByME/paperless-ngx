@@ -30,11 +30,12 @@ from documents.models import Tag
 from documents.parsers import ParseError
 from documents.plugins.helpers import ProgressStatusOptions
 from documents.tasks import sanity_check
-from documents.tests.utils import DirectoriesMixin
-from documents.tests.utils import DummyProgressManager
-from documents.tests.utils import FileSystemAssertsMixin
 from documents.tests.utils import GetConsumerMixin
 from paperless_mail.models import MailRule
+from paperless_testing.assertions import FileSystemAssertsMixin
+from paperless_testing.dirs import DirectoriesMixin
+from paperless_testing.factories import UserFactory
+from paperless_testing.fakes.progress import FakeProgressManager
 
 
 class _BaseNewStyleParser:
@@ -769,14 +770,14 @@ class TestConsumer(
 
         original_modified = timezone.now() - datetime.timedelta(days=1)
         Document.objects.filter(pk=root_doc.pk).update(modified=original_modified)
-        actor = User.objects.create_user(
+        actor = UserFactory(
             username="actor",
             email="actor@example.com",
             password="password",
         )
 
         version_file = self.get_test_file2()
-        status = DummyProgressManager(version_file.name, None)
+        status = FakeProgressManager(version_file.name, None)
         overrides = DocumentMetadataOverrides(
             version_label="v2",
             actor_id=actor.pk,
@@ -839,7 +840,7 @@ class TestConsumer(
         assert root_doc is not None
 
         version_file = self.get_test_file2()
-        status = DummyProgressManager(version_file.name, None)
+        status = FakeProgressManager(version_file.name, None)
         overrides = DocumentMetadataOverrides(
             filename="valid_pdf_version-upload",
             actor_id=999999,
@@ -896,7 +897,7 @@ class TestConsumer(
         assert root_doc is not None
 
         def consume_version(version_file: Path) -> Document:
-            status = DummyProgressManager(version_file.name, None)
+            status = FakeProgressManager(version_file.name, None)
             overrides = DocumentMetadataOverrides()
             doc = ConsumableDocument(
                 DocumentSource.ApiUpload,
@@ -1179,6 +1180,29 @@ class TestConsumer(
                 produce_archive=True,
             )
 
+    @mock.patch("documents.consumer.generate_unique_filename")
+    def test_consume_refuses_to_write_outside_originals_dir(
+        self,
+        m: mock.Mock,
+    ) -> None:
+        """
+        GIVEN:
+            - Filename generation produces a path outside of the originals directory
+        WHEN:
+            - The document is consumed
+        THEN:
+            - The consumption fails and no file is written outside of the root
+        """
+        m.return_value = Path("../../pwned.pdf")
+        escaped = (settings.ORIGINALS_DIR / ".." / ".." / "pwned.pdf").resolve()
+
+        with self.get_consumer(self.get_test_file()) as consumer:
+            with self.assertRaises(ConsumerError):
+                consumer.run()
+
+        self.assertIsNotFile(escaped)
+        self.assertEqual(Document.objects.count(), 0)
+
 
 @mock.patch("documents.consumer.magic.from_file", fake_magic_from_file)
 class TestConsumerCreatedDate(DirectoriesMixin, GetConsumerMixin, TestCase):
@@ -1329,7 +1353,7 @@ class PreConsumeTestCase(DirectoriesMixin, GetConsumerMixin, TestCase):
         with self.get_consumer(self.test_file) as c:
             c.run()
             # Verify no pre-consume script subprocess was invoked
-            # (run_subprocess may still be called by _extract_text_for_archive_check)
+            # (run_subprocess may still be called by pdf_born_digital_text via pdftotext)
             script_calls = [
                 call
                 for call in m.call_args_list
@@ -1354,7 +1378,7 @@ class PreConsumeTestCase(DirectoriesMixin, GetConsumerMixin, TestCase):
                     self.assertTrue(m.called)
 
                     # Find the call that invoked the pre-consume script
-                    # (run_subprocess may also be called by _extract_text_for_archive_check)
+                    # (run_subprocess may also be called by pdf_born_digital_text via pdftotext)
                     script_call = next(
                         call
                         for call in m.call_args_list
@@ -1559,12 +1583,92 @@ class PostConsumeTestCase(DirectoriesMixin, GetConsumerMixin, TestCase):
                         consumer.run_post_consume_script(doc)
 
 
+class TestConsumerRemoteOCR(
+    DirectoriesMixin,
+    FileSystemAssertsMixin,
+    GetConsumerMixin,
+    TestCase,
+):
+    """
+    The consumer resolves the remote OCR mode and the per-document request from
+    workflows into the allow_remote flag it hands to the parser registry.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+
+        patcher = mock.patch("documents.consumer.get_parser_registry")
+        self.mock_registry = patcher.start()
+        self.mock_registry.return_value.get_parser_for_file.return_value = DummyParser
+        self.addCleanup(patcher.stop)
+
+    def _consume(self, *, overrides: DocumentMetadataOverrides | None = None) -> bool:
+        src = (
+            Path(__file__).parent
+            / "samples"
+            / "documents"
+            / "originals"
+            / "0000001.pdf"
+        )
+        dst = self.dirs.scratch_dir / "sample.pdf"
+        shutil.copy(src, dst)
+
+        with self.get_consumer(dst, overrides=overrides) as consumer:
+            consumer.run()
+
+        _, kwargs = self.mock_registry.return_value.get_parser_for_file.call_args
+        return kwargs["allow_remote"]
+
+    @override_settings(REMOTE_OCR_MODE="always")
+    def test_always_mode_allows_remote(self) -> None:
+        """
+        GIVEN: Remote OCR mode is 'always'.
+        WHEN:  A document is consumed without any workflow asking for it.
+        THEN:  The registry is allowed to pick the remote parser.
+        """
+        self.assertTrue(self._consume())
+
+    @override_settings(REMOTE_OCR_MODE="workflow_only")
+    def test_workflow_only_mode_denies_remote_by_default(self) -> None:
+        """
+        GIVEN: Remote OCR mode is 'workflow_only'.
+        WHEN:  A document is consumed and nothing asked for remote OCR.
+        THEN:  The remote parser is excluded.
+        """
+        self.assertFalse(self._consume())
+
+    @override_settings(REMOTE_OCR_MODE="workflow_only")
+    def test_workflow_only_mode_allows_remote_when_requested(self) -> None:
+        """
+        GIVEN: Remote OCR mode is 'workflow_only'.
+        WHEN:  A workflow set remote_ocr on the metadata overrides.
+        THEN:  The registry is allowed to pick the remote parser.
+        """
+        self.assertTrue(
+            self._consume(overrides=DocumentMetadataOverrides(remote_ocr=True)),
+        )
+
+
 class TestMetadataOverrides(TestCase):
     def test_update_skip_asn_if_exists(self) -> None:
         base = DocumentMetadataOverrides()
         incoming = DocumentMetadataOverrides(skip_asn_if_exists=True)
         base.update(incoming)
         self.assertTrue(base.skip_asn_if_exists)
+
+    def test_update_remote_ocr(self) -> None:
+        base = DocumentMetadataOverrides()
+        base.update(DocumentMetadataOverrides(remote_ocr=True))
+        self.assertTrue(base.remote_ocr)
+
+    def test_update_remote_ocr_is_not_unset(self) -> None:
+        """
+        A later workflow that says nothing must not undo an earlier one that
+        asked for remote OCR.
+        """
+        base = DocumentMetadataOverrides(remote_ocr=True)
+        base.update(DocumentMetadataOverrides())
+        self.assertTrue(base.remote_ocr)
 
     def test_update_actor_and_version_label(self) -> None:
         base = DocumentMetadataOverrides(

@@ -1,7 +1,11 @@
 import { SimpleChange } from '@angular/core'
 import { ComponentFixture, TestBed } from '@angular/core/testing'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { PDFSinglePageViewer, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
+import {
+  LinkTarget,
+  PDFSinglePageViewer,
+  PDFViewer,
+} from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { PngxPdfViewerComponent } from './pdf-viewer.component'
 import { PdfRenderMode, PdfZoomLevel, PdfZoomScale } from './pdf-viewer.types'
 
@@ -58,6 +62,16 @@ describe('PngxPdfViewerComponent', () => {
     expect((component as any).pdfViewer).toBeInstanceOf(PDFViewer)
   })
 
+  it('opens external links in a new tab', () => {
+    const linkService = (component as any).linkService
+    expect(linkService.options).toEqual(
+      expect.objectContaining({
+        externalLinkTarget: LinkTarget.BLANK,
+        externalLinkRel: 'noopener noreferrer nofollow',
+      })
+    )
+  })
+
   it('resolves the worker source relative to the document base URI', async () => {
     setBaseHref('/paperless/')
     const getDocumentSpy = jest.spyOn(pdfjs, 'getDocument')
@@ -90,6 +104,7 @@ describe('PngxPdfViewerComponent', () => {
     }
     expect(viewer).toBeInstanceOf(PDFSinglePageViewer)
     expect(viewer.options.textLayerMode).toBe(0)
+    expect(viewer.options.enableSelectionRendering).toBe(false)
   })
 
   it('applies zoom, rotation, and page changes', async () => {
@@ -129,13 +144,25 @@ describe('PngxPdfViewerComponent', () => {
     ;(component as any).applyScale()
     expect(viewer.currentScaleValue).toBe(PdfZoomScale.PageFit)
     expect(viewer.currentScale).toBe(2)
+  })
 
+  it('does not reapply scale for page-only changes', async () => {
+    await initComponent()
+
+    const pdf = (component as any).pdf as { numPages: number }
+    pdf.numPages = 3
+    const viewer = (component as any).pdfViewer as PDFViewer
+    viewer.setDocument(pdf)
     const applyScaleSpy = jest.spyOn(component as any, 'applyScale')
     component.page = 2
-    ;(component as any).lastViewerPage = 2
-    ;(component as any).applyViewerState()
+
+    component.ngOnChanges({
+      page: new SimpleChange(1, 2, false),
+    })
+
+    expect(viewer.currentPageNumber).toBe(2)
     expect((component as any).lastViewerPage).toBeUndefined()
-    expect(applyScaleSpy).toHaveBeenCalled()
+    expect(applyScaleSpy).not.toHaveBeenCalled()
   })
 
   it('does not reset the viewer when it is already on the requested page', async () => {
@@ -281,6 +308,22 @@ describe('PngxPdfViewerComponent', () => {
 
     expect(mockViewer.setDocument).toHaveBeenCalledWith(null)
     expect(mockViewer.currentPageNumber).toBe(1)
+  })
+
+  it('reloads when the source revision changes', () => {
+    const resetSpy = jest.spyOn(component as any, 'resetViewerState')
+    const loadSpy = jest
+      .spyOn(component as any, 'loadDocument')
+      .mockImplementation(() => {})
+    component.src = 'test.pdf'
+    component.sourceRevision = 1
+
+    component.ngOnChanges({
+      sourceRevision: new SimpleChange(0, 1, false),
+    })
+
+    expect(resetSpy).toHaveBeenCalled()
+    expect(loadSpy).toHaveBeenCalled()
   })
 
   it('applies viewer state after view init when already loaded', () => {

@@ -112,6 +112,22 @@
 
                 <pngx-input-check i18n-title title="Use 'slim' sidebar (icons only)" formControlName="slimSidebarEnabled"></pngx-input-check>
 
+                <p class="mb-2 mt-3" i18n>Sidebar items to show:</p>
+                @for (option of sidebarItemOptions; track option.id) {
+                  <div class="form-check">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      [id]="'sidebar-item-setting-' + option.id"
+                      [checked]="isSidebarItemShown(option.id)"
+                      (change)="toggleSidebarItem(option.id, $event.target.checked)"
+                    />
+                    <label class="form-check-label" [for]="'sidebar-item-setting-' + option.id">
+                      {{ option.label }}
+                    </label>
+                  </div>
+                }
+
               </div>
             </div>
 
@@ -239,6 +255,12 @@
 
             <div class="row">
               <div class="col">
+                <pngx-input-check i18n-title title="Automatically request suggestions for inbox documents" i18n-hint hint="If un-checked, suggestions must be requested via the Suggest button." formControlName="documentEditingAutoSuggest"></pngx-input-check>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col">
                 <pngx-input-check i18n-title title="Show document thumbnail during loading" formControlName="documentEditingOverlayThumbnail"></pngx-input-check>
               </div>
             </div>
@@ -304,7 +326,7 @@
         <div class="row mb-3">
           <div class="col">
             <p i18n>
-              Settings apply to this user account for objects (Tags, Mail Rules, etc. but not documents) created via the web UI.
+              Settings apply to this user account for objects (Tags, Mail Rules, etc.) created via the web UI. These settings do not apply to documents.
             </p>
           </div>
         </div>

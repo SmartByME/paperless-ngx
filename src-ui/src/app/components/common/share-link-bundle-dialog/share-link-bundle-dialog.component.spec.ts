@@ -69,7 +69,7 @@ describe('ShareLinkBundleDialogComponent', () => {
       file_version: FileVersion.Original,
       expiration_days: 3,
     })
-    expect(component.buttonsEnabled).toBe(false)
+    expect(component.buttonsEnabled()).toBe(false)
     expect(confirmSpy).toHaveBeenCalled()
 
     component.form.setValue({
@@ -115,7 +115,7 @@ describe('ShareLinkBundleDialogComponent', () => {
 
     expect(copySpy).toHaveBeenCalledWith(component.getShareUrl(bundle))
     expect(component.copied()).toBe(true)
-    expect(toastService.showInfo).toHaveBeenCalled()
+    expect(toastService.showInfo).not.toHaveBeenCalled()
 
     jest.advanceTimersByTime(3000)
     expect(component.copied()).toBe(false)

@@ -121,6 +121,8 @@ export class DocumentListComponent
   settingsService = inject(SettingsService)
   private hotKeyService = inject(HotKeyService)
   permissionService = inject(PermissionsService)
+  private readonly notesEnabledSetting =
+    this.settingsService.getSignal<boolean>(SETTINGS_KEYS.NOTES_ENABLED)
 
   DisplayField = DisplayField
   DisplayMode = DisplayMode
@@ -268,9 +270,12 @@ export class DocumentListComponent
         this.list.reload()
       })
 
-    this.websocketStatusService.onDocumentDeleted().subscribe(() => {
-      this.list.reload()
-    })
+    this.websocketStatusService
+      .onDocumentDeleted()
+      .pipe(takeUntil(this.unsubscribeNotifier))
+      .subscribe(() => {
+        this.list.reload()
+      })
 
     this.route.paramMap
       .pipe(
@@ -457,6 +462,7 @@ export class DocumentListComponent
       modal.componentInstance.buttonsEnabled.set(false)
       let savedView: SavedView = {
         name: formValue.name,
+        icon: formValue.icon,
         filter_rules: this.list.filterRules,
         sort_reverse: this.list.sortReverse,
         sort_field: this.list.sortField,
@@ -573,8 +579,7 @@ export class DocumentListComponent
   }
 
   get notesEnabled(): boolean {
-    this.settingsService.trackChanges()
-    return this.settingsService.get(SETTINGS_KEYS.NOTES_ENABLED)
+    return this.notesEnabledSetting()
   }
 
   resetFilters() {

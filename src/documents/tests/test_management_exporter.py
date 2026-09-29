@@ -6,6 +6,8 @@ from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+from zipfile import ZIP_DEFLATED
+from zipfile import ZIP_LZMA
 from zipfile import ZipFile
 
 import pytest
@@ -24,7 +26,6 @@ from django.test import override_settings
 from django.utils import timezone
 from guardian.models import GroupObjectPermission
 from guardian.models import UserObjectPermission
-from guardian.shortcuts import assign_perm
 
 from documents.management.commands import document_exporter
 from documents.models import Correspondent
@@ -44,11 +45,12 @@ from documents.models import WorkflowTrigger
 from documents.sanity_checker import check_sanity
 from documents.settings import EXPORTER_FILE_NAME
 from documents.settings import EXPORTER_SHARE_LINK_BUNDLE_NAME
-from documents.tests.utils import DirectoriesMixin
-from documents.tests.utils import FileSystemAssertsMixin
 from documents.tests.utils import SampleDirMixin
-from documents.tests.utils import paperless_environment
 from paperless_mail.models import MailAccount
+from paperless_testing.assertions import FileSystemAssertsMixin
+from paperless_testing.dirs import DirectoriesMixin
+from paperless_testing.dirs import paperless_environment
+from paperless_testing.permissions import grant_object
 
 
 @pytest.mark.management
@@ -103,8 +105,8 @@ class TestExportImport(
             user=self.user,
         )
 
-        assign_perm("view_document", self.user2, self.d2)
-        assign_perm("view_document", self.group1, self.d3)
+        grant_object(self.user2, self.d2, "view_document")
+        grant_object(self.group1, self.d3, "view_document")
 
         self.t1 = Tag.objects.create(name="t")
         self.dt1 = DocumentType.objects.create(name="dt")
@@ -426,7 +428,7 @@ class TestExportImport(
         st_mtime_1 = (self.target / "manifest.json").stat().st_mtime
 
         with mock.patch(
-            "documents.management.commands.document_exporter.copy_file_with_basic_stats",
+            "documents.export.sinks.copy_file_with_basic_stats",
         ) as m:
             self._do_export()
             m.assert_not_called()
@@ -437,7 +439,7 @@ class TestExportImport(
         Path(self.d1.source_path).touch()
 
         with mock.patch(
-            "documents.management.commands.document_exporter.copy_file_with_basic_stats",
+            "documents.export.sinks.copy_file_with_basic_stats",
         ) as m:
             self._do_export()
             self.assertEqual(m.call_count, 1)
@@ -464,7 +466,7 @@ class TestExportImport(
         self.assertIsFile(self.target / "manifest.json")
 
         with mock.patch(
-            "documents.management.commands.document_exporter.copy_file_with_basic_stats",
+            "documents.export.sinks.copy_file_with_basic_stats",
         ) as m:
             self._do_export()
             m.assert_not_called()
@@ -475,7 +477,7 @@ class TestExportImport(
         self.d2.save()
 
         with mock.patch(
-            "documents.management.commands.document_exporter.copy_file_with_basic_stats",
+            "documents.export.sinks.copy_file_with_basic_stats",
         ) as m:
             self._do_export(compare_checksums=True)
             self.assertEqual(m.call_count, 1)
@@ -675,12 +677,13 @@ class TestExportImport(
         THEN:
             - Error is raised
         """
-        args = ["document_exporter", "/tmp/foo/bar"]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = ["document_exporter", str(Path(tmp_dir) / "does-not-exist")]
 
-        with self.assertRaises(CommandError) as e:
-            call_command(*args, skip_checks=True)
+            with self.assertRaises(CommandError) as e:
+                call_command(*args, skip_checks=True)
 
-        self.assertEqual("That path doesn't exist", str(e.exception))
+            self.assertEqual("That path doesn't exist", str(e.exception))
 
     def test_export_target_exists_but_is_file(self) -> None:
         """
@@ -1057,6 +1060,217 @@ class TestExportImport(
         )
 
         self.assertEqual(Document.objects.all().count(), 4)
+
+    def test_zip_with_compare_flags_raises(self) -> None:
+        """
+        GIVEN:
+            - A request to export to a zip file
+        WHEN:
+            - --compare-checksums or --compare-json is also passed
+        THEN:
+            - A CommandError is raised (the flags are no-ops in zip mode)
+        """
+        for flag in ("--compare-checksums", "--compare-json"):
+            with self.subTest(flag=flag):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "document_exporter",
+                        self.target,
+                        "--zip",
+                        flag,
+                        skip_checks=True,
+                    )
+
+    def test_compression_flags_require_zip(self) -> None:
+        """
+        GIVEN:
+            - A request to export without --zip
+        WHEN:
+            - --zip-compression or --zip-compression-level is passed anyway
+        THEN:
+            - A CommandError is raised (the flags are meaningless without --zip)
+        """
+        cases = {
+            "zip-compression": ["--zip-compression", "lzma"],
+            "zip-compression-level": ["--zip-compression-level", "5"],
+        }
+        for case_id, args in cases.items():
+            with self.subTest(case_id), self.assertRaises(CommandError):
+                call_command(
+                    "document_exporter",
+                    self.target,
+                    *args,
+                    skip_checks=True,
+                )
+
+    def test_zip_compression_level_out_of_range_raises(self) -> None:
+        """
+        GIVEN:
+            - A request to export to a zip file
+        WHEN:
+            - --zip-compression-level is outside the chosen method's valid range
+        THEN:
+            - A CommandError is raised
+        """
+        with self.assertRaises(CommandError):
+            call_command(
+                "document_exporter",
+                self.target,
+                "--zip",
+                "--zip-compression",
+                "deflated",
+                "--zip-compression-level",
+                "99",
+                skip_checks=True,
+            )
+
+    def test_zip_compression_level_rejected_for_levelless_method(self) -> None:
+        """
+        GIVEN:
+            - A request to export to a zip file with a compression method
+              that ignores level entirely (stored, lzma)
+        WHEN:
+            - --zip-compression-level is also passed
+        THEN:
+            - A CommandError is raised
+        """
+        for method in ("stored", "lzma"):
+            with self.subTest(method), self.assertRaises(CommandError):
+                call_command(
+                    "document_exporter",
+                    self.target,
+                    "--zip",
+                    "--zip-compression",
+                    method,
+                    "--zip-compression-level",
+                    "5",
+                    skip_checks=True,
+                )
+
+    def test_zstd_unavailable_raises_friendly_error(self) -> None:
+        """
+        GIVEN:
+            - A Python runtime without zstd support (< 3.14)
+        WHEN:
+            - --zip-compression zstd is requested
+        THEN:
+            - A CommandError naming the Python version requirement is raised
+
+        zstd availability is mocked rather than relying on the actual
+        runtime: on a Python 3.14+ CI leg, ZSTD is not None, so without the
+        mock this check is skipped and the command falls through into the
+        real export, which fails on missing document files instead of
+        raising the expected CommandError.
+        """
+        with (
+            mock.patch(
+                "documents.management.commands.document_exporter.ZSTD",
+                None,
+            ),
+            mock.patch(
+                "documents.management.commands.document_exporter.compression_available",
+                return_value=False,
+            ),
+            self.assertRaises(CommandError) as e,
+        ):
+            call_command(
+                "document_exporter",
+                self.target,
+                "--zip",
+                "--zip-compression",
+                "zstd",
+                skip_checks=True,
+            )
+        self.assertIn("3.14", str(e.exception))
+
+    def test_non_zstd_unavailable_raises_generic_error(self) -> None:
+        """
+        GIVEN:
+            - A Python runtime missing the module backing a non-zstd method
+              (e.g. bz2/lzma not compiled in on a minimal build)
+        WHEN:
+            - That method is requested via --zip-compression
+        THEN:
+            - A CommandError is raised naming the method, not the
+              zstd-specific "requires 3.14" message
+        """
+        with (
+            mock.patch(
+                "documents.management.commands.document_exporter.compression_available",
+                return_value=False,
+            ),
+            self.assertRaises(CommandError) as e,
+        ):
+            call_command(
+                "document_exporter",
+                self.target,
+                "--zip",
+                "--zip-compression",
+                "bzip2",
+                skip_checks=True,
+            )
+        self.assertIn("bzip2", str(e.exception))
+        self.assertNotIn("3.14", str(e.exception))
+
+    def test_zip_compression_flag_resolves_to_sink_constant(self) -> None:
+        """
+        GIVEN:
+            - A request to export to a zip file with --zip-compression lzma
+        WHEN:
+            - The export runs
+        THEN:
+            - ZipExportSink is constructed with the resolved ZIP_LZMA constant
+              (whether zipfile actually compresses with the chosen method is
+              Python's own contract, and ZipExportSink's own tests already
+              cover the forwarding; what this command owns is resolving the
+              CLI string to the right constant, so assert that resolution
+              directly)
+        """
+        with mock.patch(
+            "documents.management.commands.document_exporter.ZipExportSink",
+        ) as sink_cls:
+            call_command(
+                "document_exporter",
+                self.target,
+                "--zip",
+                "--zip-compression",
+                "lzma",
+                skip_checks=True,
+            )
+        sink_cls.assert_called_once_with(
+            mock.ANY,
+            mock.ANY,
+            delete=False,
+            compression=ZIP_LZMA,
+            compresslevel=None,
+        )
+
+    def test_default_zip_compression_resolves_to_deflate(self) -> None:
+        """
+        GIVEN:
+            - A request to export to a zip file with no --zip-compression flag
+        WHEN:
+            - The export runs
+        THEN:
+            - ZipExportSink is constructed with the default ZIP_DEFLATED
+              constant and compresslevel=None, matching pre-existing behavior
+        """
+        with mock.patch(
+            "documents.management.commands.document_exporter.ZipExportSink",
+        ) as sink_cls:
+            call_command(
+                "document_exporter",
+                self.target,
+                "--zip",
+                skip_checks=True,
+            )
+        sink_cls.assert_called_once_with(
+            mock.ANY,
+            mock.ANY,
+            delete=False,
+            compression=ZIP_DEFLATED,
+            compresslevel=None,
+        )
 
 
 @pytest.mark.management

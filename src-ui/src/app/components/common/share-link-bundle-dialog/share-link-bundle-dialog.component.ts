@@ -17,7 +17,6 @@ import {
 } from 'src/app/data/share-link-bundle'
 import { DocumentTitlePipe } from 'src/app/pipes/document-title.pipe'
 import { FileSizePipe } from 'src/app/pipes/file-size.pipe'
-import { ToastService } from 'src/app/services/toast.service'
 import { environment } from 'src/environments/environment'
 import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component'
 
@@ -36,7 +35,6 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
 export class ShareLinkBundleDialogComponent extends ConfirmDialogComponent {
   private readonly formBuilder = inject(FormBuilder)
   private readonly clipboard = inject(Clipboard)
-  private readonly toastService = inject(ToastService)
 
   readonly documents = signal<Document[]>([])
   readonly selectionCount = signal(0)
@@ -78,8 +76,9 @@ export class ShareLinkBundleDialogComponent extends ConfirmDialogComponent {
         : FileVersion.Original,
       expiration_days: this.form.value.expirationDays,
     }
-    this.buttonsEnabled = false
+    this.buttonsEnabled.set(false)
     super.confirm()
+    this.cancelBtnCaption = $localize`Close`
   }
 
   getShareUrl(bundle: ShareLinkBundleSummary): string {
@@ -93,7 +92,6 @@ export class ShareLinkBundleDialogComponent extends ConfirmDialogComponent {
     const success = this.clipboard.copy(this.getShareUrl(bundle))
     if (success) {
       this.copied.set(true)
-      this.toastService.showInfo($localize`Share link copied to clipboard.`)
       setTimeout(() => {
         this.copied.set(false)
       }, 3000)

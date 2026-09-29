@@ -1,6 +1,8 @@
 import datetime
+import imaplib
 import itertools
 import logging
+import socket
 import ssl
 import tempfile
 import traceback
@@ -33,6 +35,7 @@ from imap_tools import MailMessageFlags
 from imap_tools import errors
 from imap_tools.mailbox import MailBoxStartTls
 from imap_tools.query import LogicOperator
+from imap_tools.utils import check_command_status
 
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
@@ -72,6 +75,14 @@ APPLE_MAIL_TAG_COLORS = {
     "violet": ["$MailFlagBit0", "$MailFlagBit2"],
     "grey": ["$MailFlagBit1", "$MailFlagBit2"],
 }
+
+MAIL_FETCH_BATCH_SIZE = 500
+
+# SQLite's default SQLITE_MAX_VARIABLE_NUMBER has been 32766 since 3.32.0
+# (2020), but older/custom builds and other backends may allow fewer, so
+# stay comfortably under that ceiling for `uid__in` queries against
+# ProcessedMail.
+PROCESSED_UID_QUERY_BATCH_SIZE = 10_000
 
 
 class MailError(Exception):
@@ -289,7 +300,7 @@ def apply_mail_action(
             folder=rule.folder,
             uid=message_uid,
             uid_validity=uid_validity,
-            subject=message_subject,
+            subject=message_subject[:256],
             received=message_date,
             status="SUCCESS",
         )
@@ -301,7 +312,7 @@ def apply_mail_action(
             folder=rule.folder,
             uid=message_uid,
             uid_validity=uid_validity,
-            subject=message_subject,
+            subject=message_subject[:256],
             received=message_date,
             status="FAILED",
             error=traceback.format_exc(),
@@ -323,18 +334,24 @@ def error_callback(
     """
     A shared task that is called whenever something goes wrong during
     consumption of a file. See queue_consumption_tasks.
+
+    With CELERY_TASK_ALLOW_ERROR_CB_ON_CHORD_HEADER enabled this runs once per
+    failed header task, not once per chord, so it must be idempotent.
     """
     rule = MailRule.objects.get(pk=rule_id)
+    received = make_aware(message_date) if is_naive(message_date) else message_date
 
-    ProcessedMail.objects.create(
+    ProcessedMail.objects.get_or_create(
         rule=rule,
         folder=rule.folder,
         uid=message_uid,
         uid_validity=uid_validity,
-        subject=message_subject,
-        received=make_aware(message_date) if is_naive(message_date) else message_date,
-        status="FAILED",
-        error=traceback.format_exc(),
+        defaults={
+            "subject": message_subject[:256],
+            "received": received,
+            "status": "FAILED",
+            "error": traceback.format_exc(),
+        },
     )
 
 
@@ -421,12 +438,95 @@ def make_criterias(rule: MailRule, *, supports_gmail_labels: bool):
         return AND(rule_query, **criterias)
 
 
+class PinnedIMAP4(imaplib.IMAP4):
+    """
+    IMAP4 client which connects to addresses that have already been resolved.
+    ``self.host`` keeps the original hostname for TLS SNI and cert verification
+
+    Without pinned addresses, and with the ssl_context of the matching imaplib
+    class, this behaves exactly like imaplib.IMAP4 / imaplib.IMAP4_SSL.
+    """
+
+    def __init__(self, host, port, pinned_ips, ssl_context=None, timeout=None) -> None:
+        self._pinned_ips = pinned_ips
+        self.ssl_context = ssl_context
+        super().__init__(host, port, timeout=timeout)
+
+    def _connect_pinned(self, timeout):
+        last_error: OSError | None = None
+        for ip_str in self._pinned_ips:
+            try:
+                address = (ip_str, self.port)
+                if timeout is not None:
+                    return socket.create_connection(address, timeout)
+                return socket.create_connection(address)
+            except OSError as e:
+                last_error = e
+        raise last_error or OSError(f"Could not connect to {self.host}")
+
+    def _create_socket(self, timeout):
+        if self._pinned_ips:
+            sock = self._connect_pinned(timeout)
+        else:
+            sock = super()._create_socket(timeout)
+        if self.ssl_context is None:
+            return sock
+        return self.ssl_context.wrap_socket(sock, server_hostname=self.host)
+
+
+class PinnedClientMixin:
+    """Builds the imaplib client against the pre-resolved addresses, if any."""
+
+    def __init__(self, *args, pinned_ips: list[str] | None, **kwargs) -> None:
+        self._pinned_ips = pinned_ips
+        super().__init__(*args, **kwargs)
+
+    def _pinned_client(self, ssl_context=None) -> imaplib.IMAP4:
+        return PinnedIMAP4(
+            self._host,
+            self._port,
+            self._pinned_ips,
+            ssl_context=ssl_context,
+            timeout=self._timeout,
+        )
+
+
+class PinnedMailBox(PinnedClientMixin, MailBox):
+    def _get_mailbox_client(self) -> imaplib.IMAP4:
+        return self._pinned_client(self._ssl_context)
+
+
+class PinnedMailBoxUnencrypted(PinnedClientMixin, MailBoxUnencrypted):
+    def _get_mailbox_client(self) -> imaplib.IMAP4:
+        return self._pinned_client()
+
+
+class PinnedMailBoxStartTls(PinnedClientMixin, MailBoxStartTls):
+    def _get_mailbox_client(self) -> imaplib.IMAP4:
+        if self._port == 993:
+            raise ValueError(
+                "Port 993 requires IMAP4_SSL. Use MailBox class for SSL/TLS connection.",
+            )
+        client = self._pinned_client()
+        check_command_status(
+            client.starttls(self._ssl_context),
+            errors.MailboxStarttlsError,
+        )
+        return client
+
+
 def get_mailbox(server, port, security) -> MailBox:
     """
     Returns the correct MailBox instance for the given configuration.
     """
+    pinned_ips: list[str] | None = None
     if not settings.EMAIL_ALLOW_INTERNAL_HOSTS:
-        for ip_str in resolve_hostname_ips(server):
+        try:
+            pinned_ips = resolve_hostname_ips(server)
+        except ValueError as e:
+            raise MailError(str(e)) from e
+
+        for ip_str in pinned_ips:
             if not is_public_ip(ip_str):
                 raise MailError(
                     f"Connection blocked: {server} resolves to a non-public address",
@@ -437,11 +537,21 @@ def get_mailbox(server, port, security) -> MailBox:
         ssl_context.load_verify_locations(cafile=settings.EMAIL_CERTIFICATE_FILE)
 
     if security == MailAccount.ImapSecurity.NONE:
-        mailbox = MailBoxUnencrypted(server, port)
+        mailbox = PinnedMailBoxUnencrypted(server, port, pinned_ips=pinned_ips)
     elif security == MailAccount.ImapSecurity.STARTTLS:
-        mailbox = MailBoxStartTls(server, port, ssl_context=ssl_context)
+        mailbox = PinnedMailBoxStartTls(
+            server,
+            port,
+            ssl_context=ssl_context,
+            pinned_ips=pinned_ips,
+        )
     elif security == MailAccount.ImapSecurity.SSL:
-        mailbox = MailBox(server, port, ssl_context=ssl_context)
+        mailbox = PinnedMailBox(
+            server,
+            port,
+            ssl_context=ssl_context,
+            pinned_ips=pinned_ips,
+        )
     else:
         raise NotImplementedError("Unknown IMAP security")  # pragma: no cover
     return mailbox
@@ -681,11 +791,44 @@ class MailAccountHandler(LoggingMixin):
         )
 
         try:
+            all_uids = set(
+                M.uids(criteria=criterias, charset=rule.account.character_set),
+            )
+        except Exception as err:
+            raise MailError(
+                f"Rule {rule}: Error while searching folder {rule.folder}",
+            ) from err
+
+        all_uids_list = list(all_uids)
+        processed_uids: set[str] = set()
+        for i in range(0, len(all_uids_list), PROCESSED_UID_QUERY_BATCH_SIZE):
+            uid_chunk = all_uids_list[i : i + PROCESSED_UID_QUERY_BATCH_SIZE]
+            processed_uids_qs = ProcessedMail.objects.filter(
+                rule=rule,
+                folder=rule.folder,
+                uid__in=uid_chunk,
+            )
+            if self._current_uid_validity is not None:
+                processed_uids_qs = processed_uids_qs.filter(
+                    Q(uid_validity=self._current_uid_validity)
+                    | Q(uid_validity__isnull=True),
+                )
+            processed_uids.update(processed_uids_qs.values_list("uid", flat=True))
+
+        new_uids = all_uids - processed_uids
+
+        if not new_uids:
+            self.log.debug(
+                f"Rule {rule}: No new mail matching criteria {criterias}",
+            )
+            return 0
+
+        sorted_new_uids = sorted(new_uids, key=int)
+        try:
             messages = M.fetch(
-                criteria=criterias,
+                uid_list=sorted_new_uids,
                 mark_seen=False,
-                charset=rule.account.character_set,
-                bulk=True,
+                bulk=MAIL_FETCH_BATCH_SIZE,
             )
         except Exception as err:
             raise MailError(
@@ -757,6 +900,7 @@ class MailAccountHandler(LoggingMixin):
             not message.attachments
             and rule.consumption_scope == MailRule.ConsumptionScope.ATTACHMENTS_ONLY
         ):
+            self._record_processed_without_consumption(message, rule)
             return processed_elements
 
         self.log.debug(
@@ -791,6 +935,25 @@ class MailAccountHandler(LoggingMixin):
             )
 
         return processed_elements
+
+    def _record_processed_without_consumption(
+        self,
+        message: MailMessage,
+        rule: MailRule,
+    ) -> None:
+        ProcessedMail.objects.get_or_create(
+            rule=rule,
+            uid=message.uid,
+            folder=rule.folder,
+            uid_validity=self._current_uid_validity,
+            defaults={
+                "subject": message.subject[:256],
+                "received": make_aware(message.date)
+                if is_naive(message.date)
+                else message.date,
+                "status": "PROCESSED_WO_CONSUMPTION",
+            },
+        )
 
     def filename_inclusion_matches(
         self,
@@ -958,23 +1121,7 @@ class MailAccountHandler(LoggingMixin):
             )
         else:
             # No files to consume, just mark as processed if it wasn't by .eml processing
-            if not ProcessedMail.objects.filter(
-                rule=rule,
-                uid=message.uid,
-                folder=rule.folder,
-                uid_validity=self._current_uid_validity,
-            ).exists():
-                ProcessedMail.objects.create(
-                    rule=rule,
-                    folder=rule.folder,
-                    uid=message.uid,
-                    uid_validity=self._current_uid_validity,
-                    subject=message.subject,
-                    received=make_aware(message.date)
-                    if is_naive(message.date)
-                    else message.date,
-                    status="PROCESSED_WO_CONSUMPTION",
-                )
+            self._record_processed_without_consumption(message, rule)
 
         return processed_attachments
 

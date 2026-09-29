@@ -50,7 +50,15 @@ export class OpenDocumentsService {
     if (index > -1) {
       this.documentService.get(id).subscribe({
         next: (doc) => {
-          this.openDocuments[index] = doc
+          const openDoc = this.openDocuments.find((d) => d.id == id)
+          if (!openDoc) return
+          const unsavedEdits = Object.fromEntries(
+            (openDoc.__changedFields ?? []).map((field) => [
+              field,
+              openDoc[field],
+            ])
+          )
+          Object.assign(openDoc, doc, unsavedEdits)
           this.save()
         },
         error: () => {
@@ -142,7 +150,7 @@ export class OpenDocumentsService {
       modal.componentInstance.btnClass = 'btn-warning'
       modal.componentInstance.btnCaption = $localize`Close document`
       modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
-        modal.componentInstance.buttonsEnabled = false
+        modal.componentInstance.buttonsEnabled.set(false)
         modal.close()
         this.openDocuments.splice(index, 1)
         this.dirtyDocuments.delete(doc.id)
@@ -165,7 +173,7 @@ export class OpenDocumentsService {
       modal.componentInstance.btnClass = 'btn-warning'
       modal.componentInstance.btnCaption = $localize`Close documents`
       modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
-        modal.componentInstance.buttonsEnabled = false
+        modal.componentInstance.buttonsEnabled.set(false)
         modal.close()
         this.openDocuments.splice(0, this.openDocuments.length)
         this.dirtyDocuments.clear()

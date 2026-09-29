@@ -262,6 +262,14 @@ to a positive number to enable polling and disable native filesystem notificatio
     and copy the contents to the home directory of the user you created
     earlier (`/opt/paperless`).
 
+    !!! note
+
+        If you are updating an existing bare-metal installation rather than
+        installing for the first time, see the
+        [bare metal update instructions](administration.md#bare-metal-updating)
+        instead -- extracting a new release on top of an old one can leave
+        behind stale files from the previous version.
+
     Optional: If you cloned the Git repository, you will need to
     compile the frontend yourself. See [here](development.md#front-end-development)
     and use the `build` step, not `serve`.
@@ -408,31 +416,19 @@ to a positive number to enable polling and disable native filesystem notificatio
         You may need to change the path in the files. Example:
         `ExecStart=/opt/paperless/.local/bin/celery --app paperless worker --loglevel INFO`
 
-12. Configure ImageMagick to allow processing of PDF documents. Most
-    distributions have this disabled by default, since PDF documents can
-    contain malware. If you don't do this, Paperless-ngx will fall back to
-    Ghostscript for certain steps such as thumbnail generation.
+12. Configure ImageMagick to allow processing of PDF documents and disable
+    formats that Paperless-ngx does not use. Most distributions disable PDF
+    processing by default, since PDF documents can contain malware. If you
+    don't enable it, Paperless-ngx will fall back to Ghostscript for certain
+    steps such as thumbnail generation.
 
-    Edit `/etc/ImageMagick-6/policy.xml` and adjust
-
-    ```
-    <policy domain="coder" rights="none" pattern="PDF" />
-    ```
-
-    to
-
-    ```
-    <policy domain="coder" rights="read|write" pattern="PDF" />
-    ```
+    Configure the active ImageMagick policy file (commonly
+    `/etc/ImageMagick-6/policy.xml` or `/etc/ImageMagick-7/policy.xml`) and
+    adjust similar to [the docker policy file](https://raw.githubusercontent.com/paperless-ngx/paperless-ngx/refs/heads/main/docker/rootfs/etc/ImageMagick-6/paperless-policy.xml). You should also include restrictions as noted there.
 
 **Optional: Install the [jbig2enc](https://ocrmypdf.readthedocs.io/en/latest/jbig2.html) encoder.**
 This will reduce the size of generated PDF documents. You'll most likely need to compile this yourself, because this
 software has been patented until around 2017 and binary packages are not available for most distributions.
-
-**Optional: download the NLTK data**
-If using the NLTK machine-learning processing (see [`PAPERLESS_ENABLE_NLTK`](configuration.md#PAPERLESS_ENABLE_NLTK) for details),
-download the NLTK data for the Snowball Stemmer, Stopwords and Punkt tokenizer to `/usr/share/nltk_data`. Refer to the [NLTK
-instructions](https://www.nltk.org/data.html) for details on how to download the data.
 
 #### After installation
 
@@ -649,9 +645,6 @@ hardware, but a few settings can improve performance:
   `PAPERLESS_OCR_CLEAN=none`. This will speed up OCR times and use
   less memory at the expense of slightly worse OCR results.
 - If using Docker, consider setting [`PAPERLESS_WEBSERVER_WORKERS`](configuration.md#PAPERLESS_WEBSERVER_WORKERS) to 1. This will save some memory.
-- Consider setting [`PAPERLESS_ENABLE_NLTK`](configuration.md#PAPERLESS_ENABLE_NLTK) to false, to disable the
-  more advanced language processing, which can take more memory and
-  processing time.
 
 For details, refer to [configuration](configuration.md).
 

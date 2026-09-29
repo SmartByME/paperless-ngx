@@ -54,6 +54,10 @@ export const ConfigCategory = {
   AI: $localize`AI Settings`,
 }
 
+export const ConfigSection = {
+  RemoteOCR: $localize`Remote OCR`,
+}
+
 export const LLMEmbeddingBackendConfig = {
   OPENAI_LIKE: 'openai-like',
   HUGGINGFACE: 'huggingface',
@@ -65,6 +69,15 @@ export const LLMBackendConfig = {
   OLLAMA: 'ollama',
 }
 
+export const RemoteOCREngineConfig = {
+  AZURE_AI: 'azureai',
+}
+
+export const RemoteOCRModeConfig = {
+  ALWAYS: 'always',
+  WORKFLOW_ONLY: 'workflow_only',
+}
+
 export interface ConfigOption {
   key: string
   title: string
@@ -72,6 +85,7 @@ export interface ConfigOption {
   choices?: Array<{ id: string; name: string }>
   config_key?: string
   category: string
+  section?: string
   note?: string
 }
 
@@ -180,6 +194,43 @@ export const PaperlessConfigOptions: ConfigOption[] = [
     type: ConfigOptionType.JSON,
     config_key: 'PAPERLESS_OCR_USER_ARGS',
     category: ConfigCategory.OCR,
+  },
+  {
+    key: 'remote_ocr_engine',
+    title: $localize`Remote OCR Engine`,
+    type: ConfigOptionType.Select,
+    choices: mapToItems(RemoteOCREngineConfig),
+    config_key: 'PAPERLESS_REMOTE_OCR_ENGINE',
+    category: ConfigCategory.OCR,
+    section: ConfigSection.RemoteOCR,
+    note: $localize`Enabling remote OCR sends documents to a third-party service for processing. Consider the privacy implications as well as potential costs before enabling.`,
+  },
+  {
+    key: 'remote_ocr_api_key',
+    title: $localize`Remote OCR API Key`,
+    type: ConfigOptionType.Password,
+    config_key: 'PAPERLESS_REMOTE_OCR_API_KEY',
+    category: ConfigCategory.OCR,
+    section: ConfigSection.RemoteOCR,
+  },
+  {
+    key: 'remote_ocr_endpoint',
+    title: $localize`Remote OCR Endpoint`,
+    type: ConfigOptionType.String,
+    config_key: 'PAPERLESS_REMOTE_OCR_ENDPOINT',
+    category: ConfigCategory.OCR,
+    section: ConfigSection.RemoteOCR,
+    note: $localize`Required when using the Azure AI engine.`,
+  },
+  {
+    key: 'remote_ocr_mode',
+    title: $localize`Remote OCR Mode`,
+    type: ConfigOptionType.Select,
+    choices: mapToItems(RemoteOCRModeConfig),
+    config_key: 'PAPERLESS_REMOTE_OCR_MODE',
+    category: ConfigCategory.OCR,
+    section: ConfigSection.RemoteOCR,
+    note: $localize`Which documents are sent to the remote engine. Use 'workflow_only' to keep remote OCR off unless a workflow enables it for a document.`,
   },
   {
     key: 'app_logo',
@@ -303,6 +354,14 @@ export const PaperlessConfigOptions: ConfigOption[] = [
     category: ConfigCategory.AI,
   },
   {
+    key: 'llm_embedding_api_key',
+    title: $localize`LLM Embedding API Key`,
+    type: ConfigOptionType.Password,
+    note: $localize`Used for embeddings when set, otherwise LLM API key is used.`,
+    config_key: 'PAPERLESS_AI_LLM_EMBEDDING_API_KEY',
+    category: ConfigCategory.AI,
+  },
+  {
     key: 'llm_embedding_endpoint',
     title: $localize`LLM Embedding Endpoint`,
     type: ConfigOptionType.String,
@@ -371,6 +430,7 @@ export const PaperlessConfigOptions: ConfigOption[] = [
 ]
 
 export interface PaperlessConfig extends ObjectWithId {
+  externally_configured_variables: string[]
   output_type: OutputTypeConfig
   pages: number
   language: string
@@ -398,9 +458,14 @@ export interface PaperlessConfig extends ObjectWithId {
   barcode_enable_tag: boolean
   barcode_tag_mapping: object
   barcode_tag_split: boolean
+  remote_ocr_engine: string
+  remote_ocr_api_key: string
+  remote_ocr_endpoint: string
+  remote_ocr_mode: string
   ai_enabled: boolean
   llm_embedding_backend: string
   llm_embedding_model: string
+  llm_embedding_api_key: string
   llm_embedding_endpoint: string
   llm_embedding_chunk_size: number
   llm_context_size: number

@@ -151,6 +151,23 @@ the background.
 
 ### Bare Metal Route {#bare-metal-updating}
 
+!!! warning
+
+    Extracting a new release archive on top of an existing installation
+    (e.g. `tar -xf paperless-ngx-vX.Y.Z.tar.xz -C /opt/paperless`) only adds
+    and overwrites files -- it does not remove files that were deleted in
+    the new release. Leftover files from an old version, such as
+    superseded database migrations, can remain on disk and cause errors
+    like `NodeNotFoundError` during `manage.py migrate`.
+
+    Before unpacking a new release over an existing bare-metal
+    installation, remove the previous source tree first (everything
+    except your `media`, `data`, and `consume` directories and your
+    `paperless.conf`/`.env`), or unpack into a fresh directory and move
+    your persistent data and configuration over. Installations updated via
+    `git pull` on a clean checkout are not affected, since Git removes
+    files that no longer exist upstream.
+
 After grabbing the new release and unpacking the contents, do the
 following:
 
@@ -194,6 +211,16 @@ following:
 
     This is a no-op if the index is already up to date, so it is safe to
     run on every upgrade.
+
+5.  Migrate the LLM index if needed.
+
+    ```shell-session
+    cd src
+    python3 manage.py document_llmindex migrate
+    ```
+
+    This is a no-op if the index schema is already current, so it is safe
+    to run on every upgrade.
 
 ### Database Upgrades
 
@@ -272,6 +299,8 @@ optional arguments:
 -sm, --split-manifest
 -z,  --zip
 -zn, --zip-name
+--zip-compression
+--zip-compression-level
 --data-only
 --no-progress-bar
 --passphrase
@@ -333,6 +362,19 @@ document type, etc)
 If `-z` or `--zip` is provided, the export will be a zip file
 in the target directory, named according to the current local date or the
 value set in `-zn` or `--zip-name`.
+
+The compression method for the zip can be set with `--zip-compression`
+(`stored`, `deflated` (default), `bzip2`, `lzma`, or `zstd`) and tuned with
+`--zip-compression-level` (deflated: 0–9, bzip2: 1–9, zstd: -22–22; ignored
+for `stored` and `lzma`). Both options require `--zip`.
+
+!!! warning
+
+    `zstd` compression requires Python 3.14 or newer on **both** the machine
+    creating the export and any machine importing it. An archive compressed with
+    `zstd` (or `lzma`/`bzip2` where those modules are unavailable) cannot be
+    imported on a runtime that lacks the codec; the importer will refuse it with
+    a clear error. The default `deflated` is universally readable.
 
 If `--data-only` is provided, only the database will be exported. This option is intended
 to facilitate database upgrades without needing to clean documents and thumbnails from the media directory.
@@ -479,7 +521,8 @@ Pass `--recreate` to wipe the existing index before rebuilding. Use this when th
 index is corrupted or you want a fully clean rebuild.
 
 Pass `--if-needed` to skip the rebuild if the index is already up to date (schema
-version and search language match). Safe to run on every startup or upgrade.
+version, schema fingerprint and search language all match). Safe to run on every
+startup or upgrade.
 
 Specify `optimize` to optimize the index. This command is regularly invoked by the
 task scheduler.
@@ -515,7 +558,7 @@ index is updated automatically on the schedule set by
 can manage it manually:
 
 ```
-document_llmindex {rebuild,update,compact}
+document_llmindex {rebuild,update,compact,migrate}
 ```
 
 Specify `rebuild` to build the index from scratch from all documents in the database. Use
@@ -672,6 +715,7 @@ document_fuzzy_match [--ratio] [--processes N]
 | --ratio     | No       | 85.0                | a number between 0 and 100, setting how similar a document must be for it to be reported. Higher numbers mean more similarity. |
 | --processes | No       | 1/4 of system cores | Number of processes to use for matching. Setting 1 disables multiple processes                                                 |
 | --delete    | No       | False               | If provided, one document of a matched pair above the ratio will be deleted.                                                   |
+| --url       | No       | blank               | If an instance URL is provided, the output table will show URLs to each documents instead of the document ID and name.         |
 
 !!! warning
 

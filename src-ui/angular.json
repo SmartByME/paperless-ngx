@@ -56,13 +56,13 @@
       },
       "architect": {
         "build": {
-          "builder": "@angular-builders/custom-webpack:browser",
+          "builder": "@angular/build:application",
           "options": {
-            "customWebpackConfig": {
-                "path": "./extra-webpack.config.ts"
+            "outputPath": {
+              "base": "dist/paperless-ui",
+              "browser": ""
             },
-            "outputPath": "dist/paperless-ui",
-            "main": "src/main.ts",
+            "browser": "src/main.ts",
             "outputHashing": "none",
             "index": "src/index.html",
             "polyfills": [
@@ -71,8 +71,10 @@
             "tsConfig": "tsconfig.app.json",
             "localize": true,
             "assets": [
-              "src/favicon.ico",
               "src/apple-touch-icon.png",
+              "src/icon-192.png",
+              "src/icon-512.png",
+              "src/icon-512-maskable.png",
               "src/assets",
               "src/manifest.webmanifest",
               {
@@ -97,6 +99,7 @@
             "scripts": [],
             "allowedCommonJsDependencies": [
               "file-saver",
+              "mime-names",
               "utif"
             ],
             "extractLicenses": false,
@@ -117,11 +120,13 @@
                   "with": "src/environments/environment.prod.ts"
                 }
               ],
-              "outputPath": "../src/documents/static/frontend/",
+              "outputPath": {
+                "base": "../src/documents/static/frontend/",
+                "browser": ""
+              },
               "optimization": true,
               "outputHashing": "none",
               "sourceMap": false,
-              "namedChunks": false,
               "extractLicenses": true,
               "budgets": [
                 {
@@ -136,6 +141,17 @@
                 }
               ]
             },
+            "e2e": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.e2e.ts"
+                }
+              ],
+              "localize": [
+                "en-US"
+              ]
+            },
             "en-US": {
               "localize": [
                 "en-US"
@@ -145,18 +161,21 @@
           "defaultConfiguration": ""
         },
         "serve": {
-          "builder": "@angular-builders/custom-webpack:dev-server",
+          "builder": "@angular/build:dev-server",
           "options": {
             "buildTarget": "paperless-ui:build:en-US"
           },
           "configurations": {
             "production": {
               "buildTarget": "paperless-ui:build:production"
+            },
+            "e2e": {
+              "buildTarget": "paperless-ui:build:e2e"
             }
           }
         },
         "extract-i18n": {
-          "builder": "@angular-builders/custom-webpack:extract-i18n",
+          "builder": "@angular/build:extract-i18n",
           "options": {
             "buildTarget": "paperless-ui:build"
           }

@@ -99,6 +99,10 @@ const TASK_TYPE_OPTIONS: Array<{
     value: PaperlessTaskType.BulkDelete,
     label: $localize`Bulk Delete`,
   },
+  {
+    value: PaperlessTaskType.ApplyAiSuggestions,
+    label: $localize`Apply AI Suggestions`,
+  },
 ]
 
 const TRIGGER_SOURCE_OPTIONS: Array<{
@@ -316,7 +320,7 @@ export class TasksComponent
       modal.componentInstance.btnClass = 'btn-warning'
       modal.componentInstance.btnCaption = $localize`Dismiss`
       modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
-        modal.componentInstance.buttonsEnabled = false
+        modal.componentInstance.buttonsEnabled.set(false)
         modal.close()
         this.tasksService.dismissTasks(tasks).subscribe({
           next: () => {
@@ -324,7 +328,7 @@ export class TasksComponent
           },
           error: (e) => {
             this.toastService.showError($localize`Error dismissing tasks`, e)
-            modal.componentInstance.buttonsEnabled = true
+            modal.componentInstance.buttonsEnabled.set(true)
           },
         })
         this.clearSelection()
@@ -350,7 +354,7 @@ export class TasksComponent
     modal.componentInstance.btnClass = 'btn-warning'
     modal.componentInstance.btnCaption = $localize`Dismiss`
     modal.componentInstance.confirmClicked.pipe(first()).subscribe(() => {
-      modal.componentInstance.buttonsEnabled = false
+      modal.componentInstance.buttonsEnabled.set(false)
       modal.close()
       this.tasksService.dismissAllTasks().subscribe({
         next: () => {
@@ -358,7 +362,7 @@ export class TasksComponent
         },
         error: (e) => {
           this.toastService.showError($localize`Error dismissing tasks`, e)
-          modal.componentInstance.buttonsEnabled = true
+          modal.componentInstance.buttonsEnabled.set(true)
         },
       })
       this.clearSelection()

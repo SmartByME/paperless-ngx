@@ -3,6 +3,7 @@
   i18n-title
   info="Tasks shows detailed information about document consumption and system tasks."
   i18n-info
+  [loading]="loading() && pagedTasks().length === 0"
   >
   <div class="btn-toolbar col col-md-auto align-items-center gap-2">
     <button class="btn btn-sm btn-outline-secondary me-2" (click)="clearSelection()" [hidden]="selectedTasks.size === 0">
@@ -20,11 +21,6 @@
     </div>
   </div>
 </pngx-page-header>
-
-@if (!tasksService.completedFileTasks && tasksService.loading) {
-  <div class="spinner-border spinner-border-sm fw-normal ms-2 me-auto" role="status"></div>
-  <div class="visually-hidden" i18n>Loading...</div>
-}
 
 <div class="task-controls mb-3 gap-3 btn-toolbar align-items-center" role="toolbar">
   <div class="task-view-scope btn-group btn-group-sm" role="group">
@@ -89,7 +85,7 @@
         </div>
       </div>
       @if (filterText?.length) {
-        <button class="btn btn-link btn-sm px-2 position-absolute top-0 end-0 z-10" (click)="resetFilter()">
+        <button class="btn btn-link btn-sm px-2 position-absolute top-0 end-0 z-10" (click)="resetFilter()" aria-label="Clear search" i18n-aria-label>
           <i-bs width="1em" height="1em" name="x"></i-bs>
         </button>
       }
@@ -208,7 +204,7 @@
               </td>
             }
             <td class="d-lg-none">
-              <button class="btn btn-link" (click)="expandTask(task); $event.stopPropagation();">
+              <button class="btn btn-link" (click)="expandTask(task); $event.stopPropagation();" aria-label="View task details" i18n-aria-label>
                 <i-bs width="1.2em" height="1.2em" name="info-circle"></i-bs>
               </button>
             </td>
@@ -285,6 +281,6 @@
       <ng-container [ngTemplateOutlet]="tasksTemplate" [ngTemplateOutletContext]="{tasks: tasksForSection(section), section: section}"></ng-container>
     </div>
   }
-} @else {
+} @else if (!loading() || pagedTasks().length > 0) {
   <div class="alert alert-secondary fst-italic" i18n>No tasks match the current filters.</div>
 }
