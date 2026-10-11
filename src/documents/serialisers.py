@@ -60,6 +60,7 @@ from documents.models import Correspondent
 from documents.models import CustomField
 from documents.models import CustomFieldInstance
 from documents.models import Document
+from documents.models import DocumentBarcode
 from documents.models import DocumentType
 from documents.models import MatchingModel
 from documents.models import Note
@@ -89,6 +90,7 @@ from documents.templating.utils import convert_format_str_to_template_format
 from documents.templating.workflows import validate_workflow_template
 from documents.validators import uri_validator
 from documents.validators import url_validator
+from documents.versioning import get_root_document
 from documents.versioning import has_prefetched_effective_content
 from documents.versioning import sort_versions_newest_first
 
@@ -985,6 +987,12 @@ class BasicUserSerializer(serializers.ModelSerializer[User]):
     class Meta:
         model = User
         fields = ["id", "username", "first_name", "last_name"]
+
+
+class DocumentBarcodeSerializer(serializers.ModelSerializer[DocumentBarcode]):
+    class Meta:
+        model = DocumentBarcode
+        fields = ["page", "value", "format"]
 
 
 class NotesSerializer(serializers.ModelSerializer[Note]):
@@ -2887,7 +2895,7 @@ class ShareLinkSerializer(OwnedObjectSerializer):
             and has_perms_owner_aware(
                 self.user,
                 "view_document",
-                document,
+                get_root_document(document),
             )
         ):
             return document

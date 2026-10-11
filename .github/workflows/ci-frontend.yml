@@ -72,7 +72,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend_changed == 'true'
     name: Install Dependencies
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -104,7 +104,7 @@ jobs:
     name: Lint
     needs: [changes, install-dependencies]
     if: needs.changes.outputs.frontend_changed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -137,7 +137,7 @@ jobs:
     name: "Unit Tests (${{ matrix.shard-index }}/${{ matrix.shard-count }})"
     needs: [changes, install-dependencies]
     if: needs.changes.outputs.frontend_changed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     strategy:
@@ -188,10 +188,10 @@ jobs:
     name: E2E Tests
     needs: [changes, install-dependencies]
     if: needs.changes.outputs.frontend_changed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
-    container: mcr.microsoft.com/playwright:v1.62.1-noble
+    container: mcr.microsoft.com/playwright:v1.62.1-resolute
     env:
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
@@ -231,9 +231,10 @@ jobs:
       - name: Install dependencies
         run: cd src-ui && pnpm install --frozen-lockfile
       - name: Install backend system dependencies
-        run: |
-          apt-get update
-          apt-get install --yes --quiet --no-install-recommends libmagic1
+        timeout-minutes: 12
+        uses: $/.github/actions/apt-install
+        with:
+          packages: libmagic1
       - name: Install backend dependencies
         env:
           PYTHON_VERSION: ${{ steps.setup-python.outputs.python-version }}
@@ -245,7 +246,7 @@ jobs:
     name: Frontend Build
     needs: [changes, unit-tests, e2e-tests]
     if: needs.changes.outputs.frontend_changed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
