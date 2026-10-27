@@ -15,9 +15,12 @@ from documents.matching import match_document_types
 from documents.matching import match_storage_paths
 from documents.matching import match_tags
 from documents.models import Correspondent
+from documents.models import Document
 from documents.models import DocumentType
 from documents.models import StoragePath
 from documents.models import Tag
+from documents.permissions import get_permission_grantees
+from documents.permissions import has_perms_owner_aware
 from documents.permissions import permitted_document_ids
 from documents.permissions import permitted_object_ids
 from documents.permissions import restrict_queryset_to_visible
@@ -468,6 +471,92 @@ class TestPermittedDocumentIdsVersions:
             expected_visible=[root.pk, version.pk],
             expected_hidden=[],
         )
+
+
+@pytest.mark.django_db
+class TestHasPermsOwnerAwareVersions:
+    """
+    The single-object check agrees with permitted_document_ids: a version is
+    authorized by its root document.
+    """
+
+    @pytest.mark.parametrize(
+        ("root_owner", "version_owner", "expected"),
+        [
+            pytest.param(
+                "other",
+                "nobody",
+                False,
+                id="unowned-version-of-private-root",
+            ),
+            pytest.param("other", "user", False, id="own-version-of-private-root"),
+            pytest.param("user", "other", True, id="foreign-version-of-own-root"),
+            pytest.param("nobody", "other", True, id="private-version-of-unowned-root"),
+        ],
+    )
+    def test_version_follows_root_owner(
+        self,
+        root_owner: str,
+        version_owner: str,
+        *,
+        expected: bool,
+    ) -> None:
+        """
+        GIVEN:
+            - A root document and a version with differing owners
+        WHEN:
+            - The single-object check runs for the version
+        THEN:
+            - The version is allowed exactly when its root is
+        """
+        user = UserFactory()
+        owners = {"user": user, "other": UserFactory(), "nobody": None}
+        root = DocumentFactory(owner=owners[root_owner])
+        version = DocumentFactory(root_document=root, owner=owners[version_owner])
+
+        assert has_perms_owner_aware(user, "view_document", version) is expected
+        assert has_perms_owner_aware(user, "view_document", root) is expected
+
+    def test_grant_on_root_applies_and_grant_on_version_does_not(self) -> None:
+        """
+        GIVEN:
+            - A private root with a version, and a second private root with a version
+            - The user may change only the first root, and was granted the second
+              root's version directly
+        WHEN:
+            - The single-object check runs for each version
+        THEN:
+            - Only the first root's version is allowed
+        """
+        user = UserFactory()
+        shared_root = DocumentFactory(owner=UserFactory())
+        shared_version = DocumentFactory(root_document=shared_root, owner=UserFactory())
+        private_root = DocumentFactory(owner=UserFactory())
+        private_version = DocumentFactory(
+            root_document=private_root,
+            owner=UserFactory(),
+        )
+        grant_object(user, shared_root, "change_document")
+        grant_object(user, private_version, "change_document")
+
+        assert has_perms_owner_aware(user, "change_document", shared_version)
+        assert not has_perms_owner_aware(user, "change_document", private_version)
+
+    def test_other_models_use_their_own_owner(self) -> None:
+        """
+        GIVEN:
+            - A tag owned by someone else, and one owned by the user
+        WHEN:
+            - The single-object check runs for each
+        THEN:
+            - Only the user's own tag is allowed without a grant
+        """
+        user = UserFactory()
+        mine = TagFactory(owner=user)
+        theirs = TagFactory(owner=UserFactory())
+
+        assert has_perms_owner_aware(user, "view_tag", mine)
+        assert not has_perms_owner_aware(user, "view_tag", theirs)
 
 
 @pytest.mark.django_db
@@ -1285,3 +1374,101 @@ class TestRestrictQuerysetToVisible:
 
         assert own.pk in visible_ids
         assert hidden.pk not in visible_ids
+
+
+@pytest.mark.django_db
+class TestGetPermissionGrantees:
+    def test_lists_direct_grants_per_object_and_action(self) -> None:
+        """
+        GIVEN:
+            - Two documents, the first with view and change granted to a user
+              and a group, the second with only view granted to another user
+            - A user who is a member of the granted group
+        WHEN:
+            - get_permission_grantees() is called for both documents
+        THEN:
+            - Each document and action lists exactly its direct grants
+            - The group member is not listed as a user
+        """
+        direct = UserFactory()
+        other = UserFactory()
+        member = UserFactory()
+        group = Group.objects.create(name="grantees")
+        member.groups.add(group)
+        first = DocumentFactory()
+        second = DocumentFactory()
+        grant_object(direct, first, "view_document", "change_document")
+        grant_object(group, first, "view_document", "change_document")
+        grant_object(other, second, "view_document")
+
+        grantees = get_permission_grantees(Document, [first.pk, second.pk])
+
+        assert grantees == {
+            first.pk: {
+                "view": {"users": [direct.pk], "groups": [group.pk]},
+                "change": {"users": [direct.pk], "groups": [group.pk]},
+            },
+            second.pk: {
+                "view": {"users": [other.pk], "groups": []},
+                "change": {"users": [], "groups": []},
+            },
+        }
+
+    def test_ids_are_sorted(self) -> None:
+        """
+        GIVEN:
+            - A tag with view granted to three users in reverse creation order
+        WHEN:
+            - get_permission_grantees() is called for the tag
+        THEN:
+            - The user ids come back in ascending order
+        """
+        users = [UserFactory() for _ in range(3)]
+        tag = TagFactory()
+        for user in reversed(users):
+            grant_object(user, tag, "view_tag")
+
+        grantees = get_permission_grantees(Tag, [tag.pk], actions=("view",))
+
+        assert grantees[tag.pk]["view"]["users"] == sorted(user.pk for user in users)
+
+    def test_only_requested_actions_are_returned(self) -> None:
+        """
+        GIVEN:
+            - A tag with view and change granted to a user
+        WHEN:
+            - get_permission_grantees() is called for the view action only
+        THEN:
+            - Only the view action is returned
+        """
+        user = UserFactory()
+        tag = TagFactory()
+        grant_object(user, tag, "view_tag", "change_tag")
+
+        grantees = get_permission_grantees(Tag, [tag.pk], actions=("view",))
+
+        assert grantees == {tag.pk: {"view": {"users": [user.pk], "groups": []}}}
+
+    def test_grants_on_another_model_with_the_same_pk_are_ignored(self) -> None:
+        """
+        GIVEN:
+            - A tag and a correspondent sharing a primary key, with view
+              granted to a user on the tag only
+        WHEN:
+            - get_permission_grantees() is called for the correspondent
+        THEN:
+            - No grants are returned
+        """
+        user = UserFactory()
+        tag = TagFactory()
+        correspondent = CorrespondentFactory(pk=tag.pk)
+        grant_object(user, tag, "view_tag")
+
+        grantees = get_permission_grantees(Correspondent, [correspondent.pk])
+
+        assert grantees == {
+            correspondent.pk: {
+                "view": {"users": [], "groups": []},
+                "change": {"users": [], "groups": []},
+            },
+        }
